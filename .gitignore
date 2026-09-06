@@ -1,0 +1,16 @@
+node_modules/
+dist/
+
+.env
+.env.local
+.env.*.local
+serviceAccountKey.json
+
+firebase-debug.log
+firebase-debug.*.log
+
+# Local coding/design assistant configuration
+.claude/
+.impeccable/
+.agents/
+.codex/

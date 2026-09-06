@@ -1,0 +1,41 @@
+name: Appointment reminders
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: luxe-nails-appointment-reminders
+  cancel-in-progress: false
+
+jobs:
+  send-reminders:
+    if: ${{ vars.APPOINTMENT_REMINDERS_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+      SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+      PASSWORD_RESET_FROM_EMAIL: ${{ secrets.PASSWORD_RESET_FROM_EMAIL }}
+      SALON_TIME_ZONE: Asia/Manila
+    steps:
+      - name: Check out the project
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install reminder worker dependencies
+        run: npm ci --prefix functions
+
+      - name: Process due appointment reminders
+        run: node scripts/processAppointmentReminders.js
