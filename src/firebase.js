@@ -18,6 +18,7 @@ import {
 } from 'firebase/auth';
 import { getDatabase, ref, set, get, onValue, update, push, remove, runTransaction, query as rtdbQuery, orderByChild, orderByKey, equalTo, startAt, endAt, limitToLast } from 'firebase/database';
 import { mergeProfileData } from './profilePersistence';
+import { getAdminAuthorizationFromRecord } from './authFlow';
 import {
   PASSWORD_RESET_EMAIL_MESSAGE,
   getPasswordResetEmailErrorMessage,
@@ -58,9 +59,9 @@ let auth = null;
 let googleProvider = null;
 let passwordResetActionCodeSettings;
 const customerRecordSyncPromises = new Map();
-const accountStatusPromises = new Map();
-const accountStatusCache = new Map();
-const ACCOUNT_STATUS_CACHE_MS = 5000;
+const authorizationPromises = new Map();
+const authorizationCache = new Map();
+const AUTHORIZATION_CACHE_MS = 5000;
 
 const NAME_REGEX = /^[A-Za-zÀ-ÖØ-öø-ÿ' -]{2,60}$/;
 
@@ -157,16 +158,8 @@ function createProfileUpdate(profile) {
   };
 }
 
-function isAdminEmail(email) {
-  return typeof email === 'string' && String(email).toLowerCase() === ADMIN_EMAIL;
-}
-
 function getProfileStorageKey(uid) {
   return `luxe-nails-profile:${uid}`;
-}
-
-function getRecordPath(email) {
-  return isAdminEmail(email) ? 'admins' : 'users';
 }
 
 function isRealtimeDatabaseAvailable() {
@@ -256,53 +249,71 @@ async function applyPersistence(remember) {
   await setPersistence(auth, persistence);
 }
 
-async function readAccountStatus(uid, email) {
-  if (!rtdb) return 'active';
-  try {
-    const path = getRecordPath(email);
-    const userRef = ref(rtdb, `${path}/${uid}`);
-    const snap = await get(userRef);
-    if (snap.exists()) {
-      const data = snap.val();
-      return data.status || 'active';
-    }
-    if (path === 'admins') {
-      const fallbackRef = ref(rtdb, `users/${uid}`);
-      const fallbackSnap = await get(fallbackRef);
-      if (fallbackSnap.exists()) {
-        const data = fallbackSnap.val();
-        return data.status || 'active';
-      }
-    }
-  } catch (error) {
-    console.warn('Unable to check account status', error);
-  }
-  return 'active';
+function isPermissionDenied(error) {
+  const code = String(error?.code || '').toLowerCase();
+  return code.includes('permission_denied') || code.includes('permission-denied');
 }
 
-async function checkAccountStatus(uid, email) {
-  const cached = accountStatusCache.get(uid);
-  if (cached && Date.now() - cached.checkedAt < ACCOUNT_STATUS_CACHE_MS) {
-    return cached.status;
+async function readUserAuthorization(uid, email) {
+  const customerAuthorization = { role: 'customer', isAdmin: false, status: 'active' };
+  if (!rtdb || !uid) return customerAuthorization;
+  if (!auth?.currentUser || auth.currentUser.uid !== uid) {
+    throw new Error('Unable to verify authorization for a different Firebase account.');
   }
 
-  const pending = accountStatusPromises.get(uid);
+  try {
+    const adminSnapshot = await get(ref(rtdb, `admins/${uid}`));
+    if (adminSnapshot.exists()) {
+      const adminAuthorization = getAdminAuthorizationFromRecord(adminSnapshot.val(), uid, email);
+      if (!adminAuthorization) {
+        throw new Error('The Admin authorization record does not match the authenticated Firebase account.');
+      }
+      return adminAuthorization;
+    }
+  } catch (error) {
+    // The current rules deny reads of a missing admins/{uid} node. That denial
+    // means this authenticated UID has no Admin authorization and is expected
+    // for normal customers. Any other failure is treated as an authorization
+    // error rather than silently granting customer or Admin access.
+    if (!isPermissionDenied(error)) throw error;
+  }
+
+  const customerSnapshot = await get(ref(rtdb, `users/${uid}`));
+  const customerRecord = customerSnapshot.exists() ? customerSnapshot.val() : null;
+  return {
+    ...customerAuthorization,
+    status: customerRecord?.status === 'inactive' ? 'inactive' : 'active',
+  };
+}
+
+async function checkUserAuthorization(uid, email) {
+  const cached = authorizationCache.get(uid);
+  if (cached && Date.now() - cached.checkedAt < AUTHORIZATION_CACHE_MS) {
+    return cached.authorization;
+  }
+
+  const pending = authorizationPromises.get(uid);
   if (pending) return pending;
 
-  const statusPromise = readAccountStatus(uid, email)
-    .then((status) => {
-      accountStatusCache.set(uid, { status, checkedAt: Date.now() });
-      return status;
+  const authorizationPromise = readUserAuthorization(uid, email)
+    .then((authorization) => {
+      authorizationCache.set(uid, { authorization, checkedAt: Date.now() });
+      return authorization;
     })
     .finally(() => {
-      if (accountStatusPromises.get(uid) === statusPromise) accountStatusPromises.delete(uid);
+      if (authorizationPromises.get(uid) === authorizationPromise) authorizationPromises.delete(uid);
     });
-  accountStatusPromises.set(uid, statusPromise);
-  return statusPromise;
+  authorizationPromises.set(uid, authorizationPromise);
+  return authorizationPromise;
+}
+
+export async function resolveUserAuthorization(uid, email) {
+  return checkUserAuthorization(uid, email);
 }
 
 export async function getAccountStatus(uid, email) {
-  return checkAccountStatus(uid, email);
+  const authorization = await checkUserAuthorization(uid, email);
+  return authorization.status;
 }
 
 export async function signInWithGoogle(remember = true) {
@@ -315,15 +326,17 @@ export async function signInWithGoogle(remember = true) {
   try {
     const result = await signInWithPopup(auth, googleProvider);
 
-    const accountStatus = await checkAccountStatus(result.user.uid, result.user.email);
-    if (accountStatus === 'inactive') {
+    const authorization = await checkUserAuthorization(result.user.uid, result.user.email);
+    if (authorization.status === 'inactive') {
       await signOut(auth);
       throw new Error('Your account has been deactivated. Please contact support.');
     }
 
-    await createOrUpdateCustomerRecord(result.user).catch((error) => {
-      console.warn('Failed to sync customer record after Google sign-in', error);
-    });
+    if (!authorization.isAdmin) {
+      await createOrUpdateCustomerRecord(result.user).catch((error) => {
+        console.warn('Failed to sync customer record after Google sign-in', error);
+      });
+    }
     return result.user;
   } catch (error) {
     throw error;
@@ -338,15 +351,17 @@ export async function signInWithEmail(email, password, remember = true) {
   await applyPersistence(remember);
   const result = await signInWithEmailAndPassword(auth, email, password);
 
-  const accountStatus = await checkAccountStatus(result.user.uid, email);
-  if (accountStatus === 'inactive') {
+  const authorization = await checkUserAuthorization(result.user.uid, result.user.email);
+  if (authorization.status === 'inactive') {
     await signOut(auth);
     throw new Error('Your account has been deactivated. Please contact support.');
   }
 
-  await createOrUpdateCustomerRecord(result.user).catch((error) => {
-    console.warn('Failed to sync customer record after email sign-in', error);
-  });
+  if (!authorization.isAdmin) {
+    await createOrUpdateCustomerRecord(result.user).catch((error) => {
+      console.warn('Failed to sync customer record after email sign-in', error);
+    });
+  }
   return result.user;
 }
 
@@ -383,7 +398,9 @@ export async function logOut() {
   if (!auth) {
     return Promise.resolve();
   }
-  return signOut(auth);
+  await signOut(auth);
+  authorizationPromises.clear();
+  authorizationCache.clear();
 }
 
 export async function requestPasswordResetEmail(email) {
@@ -935,7 +952,8 @@ export async function saveCustomerProfile(user, profile) {
   }
 
   try {
-    const path = getRecordPath(user.email);
+    const authorization = await checkUserAuthorization(user.uid, user.email);
+    const path = authorization.isAdmin ? 'admins' : 'users';
     const profileRef = ref(rtdb, `${path}/${user.uid}`);
     // Only customer-editable profile fields are written here. Loyalty fields are
     // server/admin-owned and must not be overwritten by an older local profile.
@@ -948,8 +966,7 @@ export async function saveCustomerProfile(user, profile) {
 }
 
 async function syncCustomerRecord(user) {
-  const path = getRecordPath(user.email);
-  const userRef = ref(rtdb, `${path}/${user.uid}`);
+  const userRef = ref(rtdb, `users/${user.uid}`);
   try {
     const snap = await get(userRef);
     const existing = snap.exists() ? snap.val() : {};
@@ -996,11 +1013,13 @@ export function createOrUpdateCustomerRecord(user) {
   const existingSync = customerRecordSyncPromises.get(user.uid);
   if (existingSync) return existingSync;
 
-  const syncPromise = syncCustomerRecord(user).finally(() => {
-    if (customerRecordSyncPromises.get(user.uid) === syncPromise) {
-      customerRecordSyncPromises.delete(user.uid);
-    }
-  });
+  const syncPromise = checkUserAuthorization(user.uid, user.email)
+    .then((authorization) => (authorization.isAdmin ? null : syncCustomerRecord(user)))
+    .finally(() => {
+      if (customerRecordSyncPromises.get(user.uid) === syncPromise) {
+        customerRecordSyncPromises.delete(user.uid);
+      }
+    });
   customerRecordSyncPromises.set(user.uid, syncPromise);
   return syncPromise;
 }
@@ -1105,7 +1124,8 @@ export async function getCustomerProfile(uid, email) {
   }
 
   try {
-    const path = getRecordPath(email);
+    const authorization = await checkUserAuthorization(uid, email);
+    const path = authorization.isAdmin ? 'admins' : 'users';
     const userRef = ref(rtdb, `${path}/${uid}`);
     const snap = await get(userRef);
     if (snap.exists()) {
@@ -1114,17 +1134,6 @@ export async function getCustomerProfile(uid, email) {
       const mergedProfile = mergeProfileData(storedProfile, data);
       writeStoredProfile(uid, mergedProfile);
       return mergedProfile;
-    }
-    if (path === 'admins') {
-      const fallbackRef = ref(rtdb, `users/${uid}`);
-      const fallbackSnap = await get(fallbackRef);
-      if (fallbackSnap.exists()) {
-        const data = fallbackSnap.val();
-        const storedProfile = readStoredProfile(uid) || {};
-        const mergedProfile = mergeProfileData(storedProfile, data);
-        writeStoredProfile(uid, mergedProfile);
-        return mergedProfile;
-      }
     }
   } catch (error) {
     console.warn('Realtime Database profile load failed, using local fallback', error);
@@ -1257,10 +1266,6 @@ export async function claimCustomerLoyaltyReward(uid, rewardId, loyaltyProgram, 
   return { id: claimId, ...outcome.reward };
 }
 
-const ADMIN_EMAIL = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_ADMIN_EMAIL
-  ? String(import.meta.env.VITE_ADMIN_EMAIL).toLowerCase()
-  : '';
-
 export function listenToUsers(callback) {
   if (!rtdb) {
     callback([]);
@@ -1274,7 +1279,7 @@ export function listenToUsers(callback) {
       const users = [];
       snap.forEach((childSnap) => {
         const user = mapUserRecord(childSnap);
-        if (ADMIN_EMAIL && user.email?.toLowerCase() === ADMIN_EMAIL) return; // exclude admin account
+        if (auth?.currentUser?.uid && childSnap.key === auth.currentUser.uid) return;
         users.push(user);
       });
       callback(users.sort((a, b) => a.fullName.localeCompare(b.fullName)));
@@ -1302,7 +1307,7 @@ export async function getAllUsers() {
     const users = [];
     snap.forEach((childSnap) => {
       const user = mapUserRecord(childSnap);
-      if (ADMIN_EMAIL && user.email?.toLowerCase() === ADMIN_EMAIL) return; // exclude admin
+      if (auth?.currentUser?.uid && childSnap.key === auth.currentUser.uid) return;
       users.push(user);
     });
 
@@ -1313,20 +1318,23 @@ export async function getAllUsers() {
   }
 }
 
-export async function updateUserStatus(uid, status, email) {
+export async function updateUserStatus(uid, status) {
   if (!rtdb || !uid) {
     return Promise.reject(new Error('Firebase not initialized or user ID missing'));
   }
 
   try {
-    const path = getRecordPath(email || '');
-    const userRef = ref(rtdb, `${path}/${uid}`);
+    const userRef = ref(rtdb, `users/${uid}`);
     await update(userRef, {
       status: status === 'active' ? 'active' : 'inactive',
       updatedAt: new Date().toISOString(),
     });
-    accountStatusCache.set(uid, {
-      status: status === 'active' ? 'active' : 'inactive',
+    authorizationCache.set(uid, {
+      authorization: {
+        role: 'customer',
+        isAdmin: false,
+        status: status === 'active' ? 'active' : 'inactive',
+      },
       checkedAt: Date.now(),
     });
     return true;

@@ -1,10 +1,9 @@
 import { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import Navbar from './components/Navbar';
-import { subscribeToAuthChanges, logOut, createOrUpdateCustomerRecord, getCustomerProfile, updateUserStatus, getAccountStatus, listenToPortfolio, listenToBusinessSettings, listenToUserBookings, listenToCustomerNotifications, markCustomerNotificationsRead, addPortfolioItem, updatePortfolioItem, deletePortfolioItem, prepareImageForUpload, uploadImageFile } from './firebase';
+import { subscribeToAuthChanges, logOut, createOrUpdateCustomerRecord, getCustomerProfile, updateUserStatus, resolveUserAuthorization, listenToPortfolio, listenToBusinessSettings, listenToUserBookings, listenToCustomerNotifications, markCustomerNotificationsRead, addPortfolioItem, updatePortfolioItem, deletePortfolioItem, prepareImageForUpload, uploadImageFile } from './firebase';
 import { SERVICES } from './constants/services';
 import { isValidPhoneNumber } from './validation';
 import { createServiceBookingSelection, getBookingNailArt, serviceSupportsNailArt } from './bookingPricing';
-import { getPostAuthDestination } from './authFlow';
 
 const HomePage = lazy(() => import('./pages/HomePage'));
 const BookingPage = lazy(() => import('./pages/BookingPage'));
@@ -116,6 +115,7 @@ function App() {
   const [works, setWorks] = useState([]);
   const [businessInfo, setBusinessInfo] = useState({});
   const [isSignedIn, setIsSignedIn] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [pendingBooking, setPendingBooking] = useState(false);
   const [showBookingPrompt, setShowBookingPrompt] = useState(false);
@@ -133,7 +133,6 @@ function App() {
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [bookingStatusToast, setBookingStatusToast] = useState(null);
 
-  const isAdmin = isSignedIn && user?.email?.toLowerCase() === import.meta.env.VITE_ADMIN_EMAIL?.toLowerCase();
   const visibleCustomerNotifications = useMemo(() => {
     const notificationsById = new Map();
     [...appointmentNotifications, ...customerNotifications].forEach((notification) => {
@@ -302,19 +301,36 @@ function App() {
     const unsubscribe = subscribeToAuthChanges(async (authUser) => {
       const eventId = ++authEventId;
       if (!isMounted) return;
+      setAuthReady(false);
 
       if (authUser) {
         try {
-          const accountStatus = await getAccountStatus(authUser.uid, authUser.email);
+          const authorization = await resolveUserAuthorization(authUser.uid, authUser.email);
           if (!isMounted || eventId !== authEventId) return;
-          if (accountStatus === 'inactive') {
+          if (authorization.status === 'inactive') {
             setAuthErrorMessage('Your account has been deactivated. Please contact support.');
             setUser(null);
             setIsSignedIn(false);
+            setIsAdmin(false);
             setProfileNeedsCompletion(false);
-            setCurrentPage(authUser.email?.toLowerCase() === import.meta.env.VITE_ADMIN_EMAIL?.toLowerCase() ? 'admin' : 'home');
+            setCurrentPage('admin');
             setAuthReady(true);
+            setAuthProcessing(false);
             await logOut();
+            return;
+          }
+
+          if (authorization.isAdmin) {
+            setUser(authUser);
+            setIsSignedIn(true);
+            setIsAdmin(true);
+            setProfileNeedsCompletion(false);
+            setPendingBooking(false);
+            setShowBookingPrompt(false);
+            setAuthErrorMessage('');
+            setCurrentPage('admin');
+            setAuthReady(true);
+            setAuthProcessing(false);
             return;
           }
 
@@ -324,20 +340,31 @@ function App() {
           if (!isMounted || eventId !== authEventId) return;
           setUser(authUser);
           setIsSignedIn(true);
+          setIsAdmin(false);
           setProfileNeedsCompletion(needsCompletion);
           setAuthErrorMessage('');
+          setCurrentPage((page) => (page === 'admin' ? 'home' : page));
           setAuthReady(true);
+          setAuthProcessing(false);
         } catch (error) {
           if (!isMounted || eventId !== authEventId) return;
-          console.warn('Customer record sync failed', error);
-          setUser(authUser);
-          setIsSignedIn(true);
+          console.error('Unable to resolve authenticated account authorization', error);
+          setAuthErrorMessage('Unable to verify account access. Please sign in again.');
+          setUser(null);
+          setIsSignedIn(false);
+          setIsAdmin(false);
+          setProfileNeedsCompletion(false);
+          setCurrentPage('admin');
           setAuthReady(true);
+          setAuthProcessing(false);
+          await logOut().catch(() => {});
         }
       } else {
         setUser(null);
         setIsSignedIn(false);
+        setIsAdmin(false);
         setAuthReady(true);
+        setAuthProcessing(false);
         setProfileNeedsCompletion(false);
       }
     });
@@ -349,12 +376,12 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (authReady && isSignedIn && pendingBooking) {
+    if (authReady && isSignedIn && !isAdmin && pendingBooking) {
       setPendingBooking(false);
       setShowBookingPrompt(false);
       setCurrentPage('booking');
     }
-  }, [authReady, isSignedIn, pendingBooking]);
+  }, [authReady, isAdmin, isSignedIn, pendingBooking]);
 
   useEffect(() => {
     if (authReady && !isSignedIn && currentPage === 'profile') {
@@ -592,6 +619,7 @@ function App() {
 
   const handleSignOut = async () => {
     await logOut();
+    setIsAdmin(false);
     setProfileNeedsCompletion(false);
     setCurrentPage('home');
   };
@@ -600,24 +628,11 @@ function App() {
     setCurrentPage('profile');
   };
 
-  const handleAuthSuccess = (authenticatedUser) => {
-    const destination = getPostAuthDestination({
-      email: authenticatedUser?.email,
-      adminEmail: import.meta.env.VITE_ADMIN_EMAIL,
-      pendingBooking,
-    });
-    if (authenticatedUser) {
-      setUser(authenticatedUser);
-      setIsSignedIn(true);
-      setAuthReady(true);
-    }
-    setPendingBooking(false);
+  const handleAuthSuccess = () => {
     setShowBookingPrompt(false);
     hideBanner();
     setBookingPromptKey(0);
-    setAuthProcessing(false);
     setAuthErrorMessage('');
-    setCurrentPage(destination);
   };
 
   useEffect(() => {
@@ -626,16 +641,20 @@ function App() {
     let mounted = true;
     const checkStatus = async () => {
       try {
-        const accountStatus = await getAccountStatus(user.uid, user.email);
+        const authorization = await resolveUserAuthorization(user.uid, user.email);
         if (!mounted) return;
-        if (accountStatus === 'inactive') {
+        if (authorization.status === 'inactive') {
           await logOut();
           setAuthErrorMessage('Your account has been deactivated. Please contact support.');
           setUser(null);
           setIsSignedIn(false);
+          setIsAdmin(false);
           setProfileNeedsCompletion(false);
           setCurrentPage('home');
           setAuthReady(true);
+        } else if (authorization.isAdmin !== isAdmin) {
+          setIsAdmin(authorization.isAdmin);
+          setCurrentPage(authorization.isAdmin ? 'admin' : 'home');
         }
       } catch (error) {
         console.warn('Unable to verify account status', error);
@@ -647,7 +666,7 @@ function App() {
       mounted = false;
       window.clearInterval(intervalId);
     };
-  }, [user, isSignedIn]);
+  }, [user, isAdmin, isSignedIn]);
 
   const handleProfileUpdated = (profileData) => {
     const fullNameValue = String(profileData?.fullName || profileData?.name || '').trim();

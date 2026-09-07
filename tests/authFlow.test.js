@@ -1,31 +1,52 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getGoogleAuthErrorMessage, getPostAuthDestination, isAdminAccount } from '../src/authFlow.js';
-
-const ADMIN_EMAIL = 'admin@luxenails.test';
+import {
+  getAdminAuthorizationFromRecord,
+  getGoogleAuthErrorMessage,
+  getPostAuthDestination,
+} from '../src/authFlow.js';
 
 test('a customer authenticated from the shared login route goes directly home', () => {
   assert.equal(getPostAuthDestination({
-    email: 'customer@example.com',
-    adminEmail: ADMIN_EMAIL,
+    isAdmin: false,
   }), 'home');
 });
 
 test('a pending customer booking resumes after successful authentication', () => {
   assert.equal(getPostAuthDestination({
-    email: 'customer@example.com',
-    adminEmail: ADMIN_EMAIL,
+    isAdmin: false,
     pendingBooking: true,
   }), 'booking');
 });
 
-test('only the configured admin account is sent to the admin page', () => {
-  assert.equal(isAdminAccount('ADMIN@LUXENAILS.TEST', ADMIN_EMAIL), true);
+test('only a UID-backed active admin record authorizes the admin destination', () => {
+  const authorization = getAdminAuthorizationFromRecord({
+    uid: 'admin-uid',
+    email: 'admin@luxenails.test',
+    status: 'active',
+  }, 'admin-uid', 'ADMIN@LUXENAILS.TEST');
+
+  assert.deepEqual(authorization, {
+    role: 'admin',
+    isAdmin: true,
+    status: 'active',
+  });
   assert.equal(getPostAuthDestination({
-    email: 'ADMIN@LUXENAILS.TEST',
-    adminEmail: ADMIN_EMAIL,
+    isAdmin: authorization.isAdmin,
     pendingBooking: true,
   }), 'admin');
+});
+
+test('matching a public admin email cannot authorize a customer UID', () => {
+  assert.equal(getAdminAuthorizationFromRecord({
+    uid: 'real-admin-uid',
+    email: 'admin@luxenails.test',
+    status: 'active',
+  }, 'customer-uid', 'admin@luxenails.test'), null);
+  assert.equal(getPostAuthDestination({
+    email: 'admin@luxenails.test',
+    adminEmail: 'admin@luxenails.test',
+  }), 'home');
 });
 
 test('Google popup errors produce helpful customer-facing messages', () => {

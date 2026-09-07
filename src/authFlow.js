@@ -1,11 +1,20 @@
-export function isAdminAccount(email, adminEmail) {
-  const normalizedEmail = String(email || '').trim().toLowerCase();
-  const normalizedAdminEmail = String(adminEmail || '').trim().toLowerCase();
-  return Boolean(normalizedEmail && normalizedAdminEmail && normalizedEmail === normalizedAdminEmail);
+export function getAdminAuthorizationFromRecord(record, uid, email) {
+  if (!record || typeof record !== 'object' || !uid) return null;
+
+  const recordUid = String(record.uid || '').trim();
+  const recordEmail = String(record.email || '').trim().toLowerCase();
+  const authenticatedEmail = String(email || '').trim().toLowerCase();
+  if (recordUid !== uid || !recordEmail || recordEmail !== authenticatedEmail) return null;
+
+  return {
+    role: 'admin',
+    isAdmin: true,
+    status: record.status === 'inactive' ? 'inactive' : 'active',
+  };
 }
 
-export function getPostAuthDestination({ email, adminEmail, pendingBooking = false } = {}) {
-  if (isAdminAccount(email, adminEmail)) return 'admin';
+export function getPostAuthDestination({ isAdmin = false, pendingBooking = false } = {}) {
+  if (isAdmin === true) return 'admin';
   return pendingBooking ? 'booking' : 'home';
 }
 
