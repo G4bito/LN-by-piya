@@ -1,17 +1,22 @@
 import { NAIL_ART_ADD_ON } from './constants/services.js';
+import { DEFAULT_NAIL_ART_ELIGIBLE_SERVICE_IDS } from './businessSettings.js';
 
-export function clampNailQuantity(value) {
+export function clampNailQuantity(value, maximum = 10) {
   const quantity = Number.parseInt(value, 10);
   if (!Number.isFinite(quantity)) return 1;
-  return Math.min(10, Math.max(1, quantity));
+  const normalizedMaximum = Math.min(10, Math.max(1, Number.parseInt(maximum, 10) || 10));
+  return Math.min(normalizedMaximum, Math.max(1, quantity));
 }
 
 export function serviceRequiresNailQuantity(service) {
   return service?.pricingUnit === 'nail';
 }
 
-export function serviceSupportsNailArt(service) {
-  return Boolean(service?.nailArtEligible);
+export function serviceSupportsNailArt(service, settings = {}) {
+  const configuredIds = Array.isArray(settings.nailArtEligibleServiceIds)
+    ? settings.nailArtEligibleServiceIds
+    : DEFAULT_NAIL_ART_ELIGIBLE_SERVICE_IDS;
+  return Boolean(service?.id && service.nailArtEligible && configuredIds.includes(service.id));
 }
 
 export function calculateBaseServiceTotal(service, quantity = 1) {
@@ -21,10 +26,20 @@ export function calculateBaseServiceTotal(service, quantity = 1) {
     : unitPrice;
 }
 
-export function normalizeNailArtSelection(service, nailArt = {}) {
-  const enabled = serviceSupportsNailArt(service) && nailArt?.enabled === true;
-  const quantity = enabled ? clampNailQuantity(nailArt?.quantity) : 0;
-  const pricePerNail = NAIL_ART_ADD_ON.pricePerNail;
+export function normalizeNailArtSelection(service, nailArt = {}, settings = {}) {
+  const supportsNailArt = settings.allowSavedSelection === true
+    ? Boolean(service?.nailArtEligible)
+    : serviceSupportsNailArt(service, settings);
+  const enabled = supportsNailArt && nailArt?.enabled === true;
+  const maximumQuantity = Number(settings.maximumNailArtQuantity) || 10;
+  const quantity = enabled ? clampNailQuantity(nailArt?.quantity, maximumQuantity) : 0;
+  const configuredPrice = Number(settings.nailArtPricePerNail);
+  const savedPrice = Number(nailArt?.pricePerNail);
+  const pricePerNail = Number.isFinite(configuredPrice) && configuredPrice >= 0
+    ? configuredPrice
+    : Number.isFinite(savedPrice) && savedPrice >= 0
+      ? savedPrice
+      : NAIL_ART_ADD_ON.pricePerNail;
 
   return {
     enabled,
@@ -34,13 +49,13 @@ export function normalizeNailArtSelection(service, nailArt = {}) {
   };
 }
 
-export function createServicePricingFields(service, quantity = 1, nailArtSelection = {}) {
+export function createServicePricingFields(service, quantity = 1, nailArtSelection = {}, settings = {}) {
   if (!service) {
     return {
       serviceName: '',
       basePrice: 0,
       baseTotal: 0,
-      nailArt: normalizeNailArtSelection(null),
+      nailArt: normalizeNailArtSelection(null, {}, settings),
       estimatedTotal: 0,
       totalPrice: 0,
     };
@@ -48,7 +63,7 @@ export function createServicePricingFields(service, quantity = 1, nailArtSelecti
 
   const baseQuantity = serviceRequiresNailQuantity(service) ? clampNailQuantity(quantity) : 1;
   const baseTotal = calculateBaseServiceTotal(service, baseQuantity);
-  const nailArt = normalizeNailArtSelection(service, nailArtSelection);
+  const nailArt = normalizeNailArtSelection(service, nailArtSelection, settings);
   const estimatedTotal = baseTotal + nailArt.total;
 
   return {
@@ -71,7 +86,7 @@ export function createServiceBookingSelection(service, quantity = 1, options = {
 
   return {
     ...service,
-    ...createServicePricingFields(service, quantity, options.nailArt),
+    ...createServicePricingFields(service, quantity, options.nailArt, options.settings),
     referenceImageUrl: options.referenceImageUrl || '',
     skipServiceStep: options.skipServiceStep !== false,
   };
@@ -90,5 +105,9 @@ export function getBookingNailArt(booking, service) {
         enabled: booking?.nailArtEnabled === true,
         quantity: booking?.nailArtQuantity,
       };
-  return normalizeNailArtSelection(service, source);
+  return normalizeNailArtSelection(service, source, {
+    allowSavedSelection: true,
+    nailArtPricePerNail: source?.pricePerNail,
+    maximumNailArtQuantity: 10,
+  });
 }

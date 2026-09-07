@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { getCustomerProfile, listenToScheduleMonth, saveBooking } from '../firebase';
-import { SERVICES, formatPeso, NAIL_ART_ADD_ON } from '../constants/services';
+import { getCustomerProfile, listenToScheduleMonth, requestAppointmentReschedule, saveBooking } from '../firebase';
+import { SERVICES, formatPeso } from '../constants/services';
 import { isValidPhoneNumber } from '../validation';
 import ServiceDetailsModal from './ServiceDetailsModal';
 import {
@@ -9,25 +9,26 @@ import {
   serviceRequiresNailQuantity,
   serviceSupportsNailArt,
 } from '../bookingPricing';
-import { SCHEDULE_CONFLICT_CODE, getUnavailableTimeSlots } from '../scheduling';
-import { filterBookingServices, getCalendarCells, SERVICE_FILTERS, toLocalDateKey } from '../bookingUi';
+import { SCHEDULE_CONFLICT_CODE, getServiceDurationMinutes, getUnavailableTimeSlots } from '../scheduling';
+import { filterBookingServices, getCalendarCells, SERVICE_FILTERS } from '../bookingUi';
+import {
+  BUSINESS_WEEKDAYS,
+  addDaysToDateKey,
+  getBookableTimeSlots,
+  getBookingDateRestriction,
+  getDateKeyInTimeZone,
+  groupBookingTimeSlots,
+  hasReachedDailyAppointmentLimit,
+  normalizeBusinessSettings,
+} from '../businessSettings';
 
 const STEPS = ['Service', 'Date & Time', 'Details', 'Confirm'];
-const TIME_GROUPS = Object.freeze([
-  { label: 'Morning', slots: ['09:00', '10:00', '11:00', '12:00'] },
-  { label: 'Afternoon', slots: ['1:00', '2:00'] },
-]);
-const TIME_SLOTS = TIME_GROUPS.flatMap((group) => group.slots);
-const CLOSED_WEEKDAYS = String(import.meta.env.VITE_SALON_CLOSED_WEEKDAYS ?? '0')
-  .split(',')
-  .map((value) => Number(value.trim()))
-  .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function formatSlotTime(value) {
   const [hourValue = '0', minuteValue = '00'] = String(value || '').split(':');
   let hour = Number(hourValue);
-  if (hour > 0 && hour < 9) hour += 12;
+  if (hourValue.length === 1 && hour > 0 && hour < 9) hour += 12;
   const period = hour >= 12 ? 'PM' : 'AM';
   hour %= 12;
   if (hour === 0) hour = 12;
@@ -57,7 +58,9 @@ function getContinueLabel(step) {
   return 'Confirm Booking';
 }
 
-export default function BookingCalendar({ defaultService, user, onViewBookings, onBackHome, onEditProfile }) {
+export default function BookingCalendar({ defaultService, user, onViewBookings, onBackHome, onEditProfile, businessSettings, rescheduleBooking }) {
+  const settings = useMemo(() => normalizeBusinessSettings(businessSettings), [businessSettings]);
+  const minimumStep = rescheduleBooking ? 1 : 0;
   const bookingContainerRef = useRef(null);
   const previousStepRef = useRef(defaultService?.skipServiceStep ? 1 : 0);
   const [step, setStep] = useState(defaultService?.skipServiceStep ? 1 : 0);
@@ -75,7 +78,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     defaultService?.nailQuantity ?? defaultService?.repairNailsCount ?? 1
   ));
   const [nailArtEnabled, setNailArtEnabled] = useState(defaultService?.nailArt?.enabled === true);
-  const [nailArtQuantity, setNailArtQuantity] = useState(clampNailQuantity(defaultService?.nailArt?.quantity || 1));
+  const [nailArtQuantity, setNailArtQuantity] = useState(clampNailQuantity(defaultService?.nailArt?.quantity || 1, settings.maximumNailArtQuantity));
   const [referenceImageUrl, setReferenceImageUrl] = useState(defaultService?.referenceImageUrl || '');
   const [detailService, setDetailService] = useState(() => (
     defaultService?.openCustomization ? SERVICES.find((item) => item.id === defaultService.id) || null : null
@@ -124,39 +127,64 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
   const cleanedAddress = address.trim();
   const cleanedNotes = notes.trim();
   const isPerNailService = serviceRequiresNailQuantity(selected);
-  const supportsNailArt = serviceSupportsNailArt(selected);
+  const supportsNailArt = serviceSupportsNailArt(selected, settings);
   const servicePricingFields = createServicePricingFields(selected, nailQuantity, {
     enabled: nailArtEnabled,
     quantity: nailArtQuantity,
-  });
+  }, settings);
   const totalPrice = servicePricingFields.totalPrice;
   const monthKey = getMonthKey(calendarMonth);
-  const todayKey = toLocalDateKey(new Date());
+  const now = useMemo(() => new Date(availabilityClock), [availabilityClock]);
+  const todayKey = useMemo(() => getDateKeyInTimeZone(now, settings.timezone), [now, settings.timezone]);
+  const maximumDateKey = addDaysToDateKey(todayKey, settings.maximumAdvanceDays);
+  const closedWeekdays = useMemo(() => BUSINESS_WEEKDAYS
+    .filter((day) => !settings.businessHours[day.key].open || !settings.onlineBookingHours[day.key].open)
+    .map((day) => day.dayIndex), [settings.businessHours, settings.onlineBookingHours]);
+  const blackoutDateKeys = useMemo(() => new Set(Object.keys(settings.blackoutDates)), [settings.blackoutDates]);
+  const timeSlots = useMemo(() => getBookableTimeSlots(
+    date,
+    selected ? getServiceDurationMinutes(selected) : 60,
+    settings,
+    now,
+  ), [date, now, selected, settings]);
+  const timeGroups = useMemo(() => groupBookingTimeSlots(timeSlots), [timeSlots]);
   const unavailableTimeSlots = useMemo(
-    () => getUnavailableTimeSlots(TIME_SLOTS, date, selected, scheduleEntries, {
-      includePendingHolds: true,
-      now: availabilityClock,
-    }),
-    [availabilityClock, date, scheduleEntries, selected]
+    () => hasReachedDailyAppointmentLimit(scheduleEntries, date, settings, availabilityClock, rescheduleBooking?.id)
+      ? new Set(timeSlots)
+      : getUnavailableTimeSlots(timeSlots, date, selected, scheduleEntries, {
+        includePendingHolds: true,
+        now: availabilityClock,
+        bufferMinutes: settings.appointmentBufferMinutes,
+        excludeBookingId: rescheduleBooking?.id,
+      }),
+    [availabilityClock, date, rescheduleBooking?.id, scheduleEntries, selected, settings, timeSlots]
   );
   const fullyBookedDates = useMemo(() => {
     if (!selected) return new Set();
-    const dateKeys = new Set(scheduleEntries.map((entry) => entry.date).filter(Boolean));
-    return new Set([...dateKeys].filter((dateKey) => (
-      getUnavailableTimeSlots(TIME_SLOTS, dateKey, selected, scheduleEntries, {
+    const dateKeys = new Set([todayKey, ...scheduleEntries.map((entry) => entry.date).filter(Boolean)]);
+    return new Set([...dateKeys].filter((dateKey) => {
+      const slots = getBookableTimeSlots(dateKey, getServiceDurationMinutes(selected), settings, now);
+      if (!slots.length) return !getBookingDateRestriction(dateKey, settings, now);
+      return hasReachedDailyAppointmentLimit(scheduleEntries, dateKey, settings, availabilityClock, rescheduleBooking?.id)
+        || getUnavailableTimeSlots(slots, dateKey, selected, scheduleEntries, {
         includePendingHolds: true,
-        now: availabilityClock,
-      }).size === TIME_SLOTS.length
-    )));
-  }, [availabilityClock, scheduleEntries, selected]);
+          now: availabilityClock,
+          bufferMinutes: settings.appointmentBufferMinutes,
+          excludeBookingId: rescheduleBooking?.id,
+      }).size === slots.length;
+    }));
+  }, [availabilityClock, now, rescheduleBooking?.id, scheduleEntries, selected, settings, todayKey]);
   const calendarCells = useMemo(() => getCalendarCells(calendarMonth, {
     todayKey,
-    closedWeekdays: CLOSED_WEEKDAYS,
+    closedWeekdays,
+    blackoutDates: blackoutDateKeys,
     fullyBookedDates,
-  }), [calendarMonth, fullyBookedDates, todayKey]);
+    maximumDateKey,
+    allowSameDayBooking: settings.allowSameDayBooking,
+  }), [blackoutDateKeys, calendarMonth, closedWeekdays, fullyBookedDates, maximumDateKey, settings.allowSameDayBooking, todayKey]);
   const canNext =
     (step === 0 && Boolean(service)) ||
-    (step === 1 && Boolean(date && time) && !availabilityLoading && !availabilityError && !unavailableTimeSlots.has(time)) ||
+    (step === 1 && Boolean(date && time) && timeSlots.includes(time) && !availabilityLoading && !availabilityError && !unavailableTimeSlots.has(time)) ||
     (step === 2 && nameRegex.test(cleanedName) && isValidPhoneNumber(cleanedPhone) && cleanedAddress.length > 0 && (!isPerNailService || nailQuantity > 0));
 
   useEffect(() => {
@@ -185,12 +213,12 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
   }, [bookingConfirmed, monthKey]);
 
   useEffect(() => {
-    if (!time || !unavailableTimeSlots.has(time)) return;
-    const message = `Sorry, ${formatSlotTime(time)} was just booked by another customer. Please select another available time.`;
+    if (!time || (timeSlots.includes(time) && !unavailableTimeSlots.has(time))) return;
+    const message = `Sorry, ${formatSlotTime(time)} is no longer available. Please select another time.`;
     setTime('');
     setError(message);
     setToast({ type: 'error', message });
-  }, [time, unavailableTimeSlots]);
+  }, [time, timeSlots, unavailableTimeSlots]);
 
   useEffect(() => {
     if (!date || !fullyBookedDates.has(date)) return;
@@ -200,6 +228,20 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     setError(message);
     setToast({ type: 'error', message });
   }, [date, fullyBookedDates]);
+
+  useEffect(() => {
+    if (!date) return;
+    const restriction = getBookingDateRestriction(date, settings, now);
+    if (!restriction) return;
+    setDate('');
+    setTime('');
+    setError(`That date is unavailable: ${restriction}.`);
+  }, [date, now, settings]);
+
+  useEffect(() => {
+    if (settings.allowReferencePhoto || !referenceImageUrl) return;
+    setReferenceImageUrl('');
+  }, [referenceImageUrl, settings.allowReferencePhoto]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -235,7 +277,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
   };
   const back = () => {
     setError(null);
-    setStep((currentStep) => Math.max(currentStep - 1, 0));
+    setStep((currentStep) => Math.max(currentStep - 1, minimumStep));
   };
 
   const handleSelectService = (selectedService) => {
@@ -256,8 +298,8 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     setService(selection.id);
     setNailQuantity(clampNailQuantity(selection.nailQuantity || 1));
     setNailArtEnabled(selection.nailArt?.enabled === true);
-    setNailArtQuantity(clampNailQuantity(selection.nailArt?.quantity || 1));
-    setReferenceImageUrl(selection.referenceImageUrl || '');
+    setNailArtQuantity(clampNailQuantity(selection.nailArt?.quantity || 1, settings.maximumNailArtQuantity));
+    setReferenceImageUrl(settings.allowReferencePhoto ? selection.referenceImageUrl || '' : '');
     setDate('');
     setTime('');
     setStep(1);
@@ -281,8 +323,8 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     setNotes('');
     setNailQuantity(clampNailQuantity(defaultService?.nailQuantity ?? defaultService?.repairNailsCount ?? 1));
     setNailArtEnabled(defaultService?.nailArt?.enabled === true);
-    setNailArtQuantity(clampNailQuantity(defaultService?.nailArt?.quantity || 1));
-    setReferenceImageUrl(defaultService?.referenceImageUrl || '');
+    setNailArtQuantity(clampNailQuantity(defaultService?.nailArt?.quantity || 1, settings.maximumNailArtQuantity));
+    setReferenceImageUrl(settings.allowReferencePhoto ? defaultService?.referenceImageUrl || '' : '');
     setStatus(null);
     setError(null);
   };
@@ -323,18 +365,25 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     };
 
     try {
-      await saveBooking(bookingPayload);
-      setSubmittedBooking({ ...bookingPayload, status: 'Pending Confirmation' });
+      if (rescheduleBooking?.id) {
+        await requestAppointmentReschedule(rescheduleBooking, date, time);
+      } else {
+        await saveBooking(bookingPayload);
+      }
+      setSubmittedBooking({ ...bookingPayload, status: rescheduleBooking ? 'Confirmed' : 'Pending Confirmation' });
       setBookingConfirmed(true);
       setStatus(null);
       setToast(null);
     } catch (saveError) {
       console.error('Booking save failed:', saveError);
       const conflictMessage = 'This date and time has already been booked. Please choose another available time.';
-      const message = saveError?.code === SCHEDULE_CONFLICT_CODE
+      const isConflict = saveError?.code === SCHEDULE_CONFLICT_CODE || String(saveError?.code || '').includes('already-exists');
+      const message = isConflict
         ? conflictMessage
-        : 'Unable to complete your booking right now. Please check your connection and try again.';
-      if (saveError?.code === SCHEDULE_CONFLICT_CODE) {
+        : rescheduleBooking
+          ? saveError?.message || 'Unable to reschedule this appointment right now. Please try again.'
+          : 'Unable to complete your booking right now. Please check your connection and try again.';
+      if (isConflict) {
         setTime('');
         setStep(1);
       }
@@ -357,12 +406,12 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     return (
       <div className="booking-modern-card booking-success">
         <div className="success-mark" aria-hidden="true">&#10003;</div>
-        <span className="booking-success-eyebrow">Reservation saved</span>
-        <h2>Appointment Confirmed</h2>
+        <span className="booking-success-eyebrow">{rescheduleBooking ? 'Request sent' : 'Reservation saved'}</span>
+        <h2>{rescheduleBooking ? 'Reschedule Request Submitted' : 'Appointment Confirmed'}</h2>
         <p>
-          Your {submittedService?.title || submittedBooking.service} request for {formatAppointmentDate(submittedBooking.date)} at {formatSlotTime(submittedBooking.time)} was saved successfully.
+          Your {submittedService?.title || submittedBooking.service} appointment for {formatAppointmentDate(submittedBooking.date)} at {formatSlotTime(submittedBooking.time)} was saved successfully.
         </p>
-        <p className="booking-success-note">The salon will notify you when the appointment is accepted by the admin.</p>
+        <p className="booking-success-note">{rescheduleBooking ? 'Your original appointment and time slot stay confirmed until the salon reviews this request.' : 'The salon will notify you when the appointment is accepted by the admin.'}</p>
         <div className="booking-success-summary">
           <div className="review-row"><span>Service</span><strong>{submittedService?.title || submittedBooking.service}</strong></div>
           <div className="review-row"><span>Date</span><strong>{formatAppointmentDate(submittedBooking.date)}</strong></div>
@@ -372,7 +421,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
         <div className="booking-success-actions">
           <button type="button" className="btn-primary" onClick={onViewBookings}>View My Bookings</button>
           <button type="button" className="btn-secondary" onClick={onBackHome}>Back Home</button>
-          <button type="button" className="btn-ghost" onClick={resetBookingForm}>Book Another</button>
+          {!rescheduleBooking ? <button type="button" className="btn-ghost" onClick={resetBookingForm}>Book Another</button> : null}
         </div>
       </div>
     );
@@ -437,7 +486,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                 </div>
                 <aside className="booking-policy-bar">
                   <strong><span aria-hidden="true">&#9201;</span> Booking policy</strong>
-                  <span>Appointments are subject to availability. Please arrive on time. Prices shown are estimates and may vary with design complexity.</span>
+                  <span>{settings.appointmentPreparationNote || settings.cancellationPolicy || 'Appointments are subject to availability. Please arrive on time. Prices shown are estimates and may vary with design complexity.'}</span>
                 </aside>
               </>
             ) : null}
@@ -448,7 +497,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                   <div className="booking-calendar-header">
                     <button type="button" onClick={() => handleMonthChange(-1)} disabled={monthKey <= getMonthKey(getInitialMonth())} aria-label="Previous month">&#8592;</button>
                     <h3>{calendarMonth.toLocaleDateString([], { month: 'long', year: 'numeric' })}</h3>
-                    <button type="button" onClick={() => handleMonthChange(1)} aria-label="Next month">&#8594;</button>
+                    <button type="button" onClick={() => handleMonthChange(1)} disabled={monthKey >= maximumDateKey.slice(0, 7)} aria-label="Next month">&#8594;</button>
                   </div>
                   <div className="booking-calendar-weekdays" aria-hidden="true">
                     {WEEKDAY_LABELS.map((weekday) => <span key={weekday}>{weekday}</span>)}
@@ -458,17 +507,17 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                       <button
                         type="button"
                         key={cell.key}
-                        className={`${date === cell.key ? 'is-selected' : ''} ${cell.key === todayKey ? 'is-today' : ''} ${cell.isClosed ? 'is-closed' : ''} ${cell.isFullyBooked ? 'is-unavailable' : ''}`}
+                        className={`${date === cell.key ? 'is-selected' : ''} ${cell.key === todayKey ? 'is-today' : ''} ${cell.isClosed ? 'is-closed' : ''} ${cell.isBlackout ? 'is-blackout' : ''} ${cell.isFullyBooked || cell.isBeyondAdvanceWindow || cell.isSameDayUnavailable ? 'is-unavailable' : ''}`}
                         disabled={cell.disabled}
                         onClick={() => {
                           setDate(cell.key);
                           setTime('');
                           setError(null);
                         }}
-                        aria-label={`${formatAppointmentDate(cell.key)}${cell.isClosed ? ', closed' : cell.isFullyBooked ? ', fully booked' : ''}`}
+                        aria-label={`${formatAppointmentDate(cell.key)}${cell.isBlackout ? `, ${settings.blackoutDates[cell.key]?.reason || 'closed'}` : cell.isClosed ? ', closed' : cell.isFullyBooked ? ', fully booked' : cell.isBeyondAdvanceWindow ? ', outside booking window' : cell.isSameDayUnavailable ? ', same-day booking unavailable' : ''}`}
                       >
                         <span>{cell.day}</span>
-                        {cell.isClosed ? <small>Closed</small> : cell.isFullyBooked ? <small>Full</small> : null}
+                        {cell.isBlackout ? <small>Closed</small> : cell.isClosed ? <small>Closed</small> : cell.isFullyBooked ? <small>Full</small> : cell.isBeyondAdvanceWindow ? <small>Unavailable</small> : cell.isSameDayUnavailable ? <small>Tomorrow</small> : null}
                       </button>
                     ) : <span className="booking-calendar-empty" key={`empty-${index}`} />)}
                   </div>
@@ -481,7 +530,9 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                   </div>
                   {availabilityLoading ? <p className="availability-message">Checking availability...</p> : null}
                   {availabilityError ? <p className="availability-message availability-message--error">{availabilityError}</p> : null}
-                  {TIME_GROUPS.map((group) => (
+                  {!date ? <p className="availability-message">Choose a date to see its available times.</p> : null}
+                  {date && !availabilityLoading && !availabilityError && timeGroups.length === 0 ? <p className="availability-message">No online times are available for this date.</p> : null}
+                  {timeGroups.map((group) => (
                     <div className="booking-time-group" key={group.label}>
                       <strong>{group.label}</strong>
                       <div className="slot-grid">
@@ -560,7 +611,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                     <div className="review-row"><span>Nail Art</span><strong>{servicePricingFields.nailArt.enabled ? `${servicePricingFields.nailArt.quantity} ${servicePricingFields.nailArt.quantity === 1 ? 'nail' : 'nails'}` : 'None'}</strong></div>
                     {servicePricingFields.nailArt.enabled ? (
                       <>
-                        <div className="review-row"><span>Price per nail</span><strong>{formatPeso(NAIL_ART_ADD_ON.pricePerNail)}</strong></div>
+                        <div className="review-row"><span>Price per nail</span><strong>{formatPeso(settings.nailArtPricePerNail)}</strong></div>
                         <div className="review-row"><span>Nail Art add-on</span><strong>{formatPeso(servicePricingFields.nailArt.total)}</strong></div>
                       </>
                     ) : null}
@@ -571,6 +622,15 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                   </>
                 ) : null}
                 <div className="review-row"><span>Notes</span><strong>{cleanedNotes || 'None'}</strong></div>
+                {(settings.cancellationPolicy || settings.lateArrivalPolicy || settings.noShowPolicy || settings.appointmentPreparationNote) ? (
+                  <div className="booking-policy-review">
+                    <strong>Appointment policies</strong>
+                    {settings.cancellationPolicy ? <p><b>Cancellation:</b> {settings.cancellationPolicy}</p> : null}
+                    {settings.lateArrivalPolicy ? <p><b>Late arrival:</b> {settings.lateArrivalPolicy}</p> : null}
+                    {settings.noShowPolicy ? <p><b>No-show:</b> {settings.noShowPolicy}</p> : null}
+                    {settings.appointmentPreparationNote ? <p><b>Before your appointment:</b> {settings.appointmentPreparationNote}</p> : null}
+                  </div>
+                ) : null}
                 <div className="review-row total"><span>Estimated total</span><strong>{formatPeso(totalPrice)}</strong></div>
               </div>
             ) : null}
@@ -587,7 +647,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
             {isPerNailService ? <div className="review-row"><span>Quantity</span><strong>{nailQuantity} {nailQuantity === 1 ? 'nail' : 'nails'}</strong></div> : null}
             {supportsNailArt ? (
               <>
-                <div className="review-row"><span>Nail Art</span><strong>{servicePricingFields.nailArt.enabled ? `${servicePricingFields.nailArt.quantity} nails x ${formatPeso(NAIL_ART_ADD_ON.pricePerNail)}` : 'None'}</strong></div>
+                <div className="review-row"><span>Nail Art</span><strong>{servicePricingFields.nailArt.enabled ? `${servicePricingFields.nailArt.quantity} nails x ${formatPeso(settings.nailArtPricePerNail)}` : 'None'}</strong></div>
                 {servicePricingFields.nailArt.enabled ? <div className="review-row"><span>Nail Art add-on</span><strong>{formatPeso(servicePricingFields.nailArt.total)}</strong></div> : null}
               </>
             ) : <div className="review-row"><span>Nail Art</span><strong>None</strong></div>}
@@ -602,7 +662,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
           <div className="step-nav">
             {step > 0 ? <button type="button" className="btn-ghost" onClick={back} disabled={isSaving}>Back</button> : null}
             <button type="button" className="btn-primary" disabled={(step < STEPS.length - 1 && !canNext) || isSaving} onClick={step === STEPS.length - 1 ? handleConfirm : next} aria-busy={isSaving}>
-              {isSaving ? 'Saving...' : getContinueLabel(step)}
+              {isSaving ? 'Saving...' : step === STEPS.length - 1 && rescheduleBooking ? 'Confirm Reschedule' : getContinueLabel(step)}
             </button>
           </div>
           <p className="booking-secure-note"><span aria-hidden="true">&#128274;</span> Your information is secure and private.</p>
@@ -611,6 +671,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
 
       <ServiceDetailsModal
         service={detailService}
+        businessSettings={settings}
         initialQuantity={service === detailService?.id ? nailQuantity : 1}
         initialNailArt={service === detailService?.id ? { enabled: nailArtEnabled, quantity: nailArtQuantity } : undefined}
         initialReferenceImageUrl={service === detailService?.id ? referenceImageUrl : ''}

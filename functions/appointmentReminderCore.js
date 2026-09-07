@@ -5,6 +5,20 @@ export const REMINDER_DEFINITIONS = Object.freeze({
   reminder12h: Object.freeze({ hoursBefore: 12, label: '12-hour reminder' }),
 });
 
+export function getReminderRuntimeSettings(value = {}, fallbackTimeZone = DEFAULT_SALON_TIME_ZONE) {
+  const source = value && typeof value === 'object' ? value : {};
+  const configuredTimeZone = String(source.timezone || fallbackTimeZone || DEFAULT_SALON_TIME_ZONE).trim();
+  return {
+    timeZone: isValidTimeZone(configuredTimeZone) ? configuredTimeZone : DEFAULT_SALON_TIME_ZONE,
+    businessName: String(source.businessName || 'Luxe Nails by Piya').trim().slice(0, 100) || 'Luxe Nails by Piya',
+    reminderTypes: [
+      source.reminder24hEnabled !== false ? 'reminder24h' : null,
+      source.reminder12hEnabled !== false ? 'reminder12h' : null,
+    ].filter(Boolean),
+    inAppEnabled: source.inAppReminderEnabled !== false,
+  };
+}
+
 function parseTime(value) {
   const match = String(value || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
   if (!match) return null;
@@ -17,7 +31,7 @@ function parseTime(value) {
   if (minute < 0 || minute > 59) return null;
   if (period === 'PM' && hour < 12) hour += 12;
   if (period === 'AM' && hour === 12) hour = 0;
-  if (!period && hour > 0 && hour < 9) hour += 12;
+  if (!period && match[1].length === 1 && hour > 0 && hour < 9) hour += 12;
 
   return { hour, minute };
 }
@@ -181,7 +195,7 @@ export function formatAppointmentTime(appointmentAt, timeZone = DEFAULT_SALON_TI
   }).format(new Date(appointmentAt));
 }
 
-export function buildAppointmentReminderContent({ booking, profile, reminderType, appointmentAt, timeZone }) {
+export function buildAppointmentReminderContent({ booking, profile, reminderType, appointmentAt, timeZone, businessName = 'Luxe Nails by Piya' }) {
   const definition = REMINDER_DEFINITIONS[reminderType];
   if (!definition) throw new Error('Unknown appointment reminder type.');
 
@@ -196,8 +210,8 @@ export function buildAppointmentReminderContent({ booking, profile, reminderType
   const hasReference = Boolean(booking?.referenceImageUrl || booking?.referencePhotoUrl);
   const isTomorrow = reminderType === 'reminder24h';
   const subject = isTomorrow
-    ? 'Reminder: Your Luxe Nails appointment is tomorrow'
-    : 'Your Luxe Nails appointment is coming up';
+    ? `Reminder: Your ${businessName} appointment is tomorrow`
+    : `Your ${businessName} appointment is coming up`;
   const intro = isTomorrow
     ? 'Your Luxe Nails appointment is coming up tomorrow.'
     : 'Just a reminder that your Luxe Nails appointment is coming up in approximately 12 hours.';
@@ -210,6 +224,7 @@ export function buildAppointmentReminderContent({ booking, profile, reminderType
     intro,
     message,
     title: 'Appointment Reminder',
+    businessName,
     customerName,
     serviceName,
     date,

@@ -4,8 +4,12 @@ import {
   ADMIN_NAV_ITEMS,
   ADMIN_PAGE_TITLES,
   applyCompletedBookingReward,
+  compareAppointments,
+  compareBookingsByCreatedAt,
   findAppointmentConflicts,
+  formatBookingCreatedAt,
   getCustomerAppointmentSummary,
+  getBookingCreatedAtTime,
   matchesAppointmentFilter,
   normalizeBookingStatus,
 } from '../src/adminData.js';
@@ -42,6 +46,35 @@ test('calendar date selection takes priority over the selected status filter', (
   const booking = { date: '2026-09-05', status: 'Confirmed' };
   assert.equal(matchesAppointmentFilter(booking, 'Cancelled', todayKey, '2026-09-05'), true);
   assert.equal(matchesAppointmentFilter(booking, 'All', todayKey, '2026-09-06'), false);
+});
+
+test('booking-created timestamps use the salon timezone and handle missing legacy values', () => {
+  const createdAt = '2026-09-07T12:42:00.000Z';
+
+  assert.equal(formatBookingCreatedAt(createdAt, 'Asia/Manila'), 'Sep 7, 2026 · 8:42 PM');
+  assert.equal(getBookingCreatedAtTime(createdAt), Date.parse(createdAt));
+  assert.equal(formatBookingCreatedAt(null, 'Asia/Manila'), '');
+  assert.equal(formatBookingCreatedAt('not-a-date', 'Asia/Manila'), '');
+});
+
+test('booking-created sorting stays separate from appointment-date sorting', () => {
+  const bookingA = {
+    id: 'a',
+    createdAt: '2026-09-07T12:00:00.000Z',
+    date: '2026-09-20',
+    time: '2:00 PM',
+  };
+  const bookingB = {
+    id: 'b',
+    createdAt: '2026-09-08T12:00:00.000Z',
+    date: '2026-09-10',
+    time: '10:00 AM',
+  };
+  const legacyBooking = { id: 'legacy', date: '2026-09-09', time: '9:00 AM' };
+
+  assert.deepEqual([bookingB, legacyBooking, bookingA].sort((left, right) => compareBookingsByCreatedAt(left, right, 'asc')).map(({ id }) => id), ['a', 'b', 'legacy']);
+  assert.deepEqual([bookingA, legacyBooking, bookingB].sort((left, right) => compareBookingsByCreatedAt(left, right, 'desc')).map(({ id }) => id), ['b', 'a', 'legacy']);
+  assert.deepEqual([bookingA, bookingB].sort(compareAppointments).map(({ id }) => id), ['b', 'a']);
 });
 
 test('conflict detection reports duration overlaps between confirmed appointments', () => {

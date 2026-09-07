@@ -781,6 +781,27 @@
   margin-top: 4px;
 }
 
+.adm-upload-error {
+  margin: 0.5rem 0 0;
+  color: #e6c9b7;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.adm-upload-help,
+.adm-selected-file {
+  display: block;
+  max-width: 100%;
+  color: rgba(244, 234, 217, 0.58);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.adm-selected-file {
+  color: rgba(244, 234, 217, 0.78);
+}
+
 /* ============================================================
    Buttons
    ============================================================ */
@@ -1076,6 +1097,106 @@
   line-height: 1.4;
 }
 
+.adm-booking-created-at {
+  display: block;
+  margin-top: 0.45rem;
+  color: rgba(244, 234, 217, 0.5);
+  font-size: 0.66rem;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.adm-appointment-cards {
+  display: none;
+}
+
+.adm-appointment-card {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--line-soft, rgba(201, 168, 118, 0.14));
+  border-radius: var(--adm-radius-sm);
+  background: var(--bg-card-alt, #17130f);
+}
+
+.adm-appointment-card-head,
+.adm-appointment-card-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.adm-appointment-card-head {
+  justify-content: space-between;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line-soft, rgba(201, 168, 118, 0.14));
+}
+
+.adm-appointment-card-head > div {
+  min-width: 0;
+}
+
+.adm-appointment-card-head strong,
+.adm-appointment-card-head small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.adm-appointment-card-head strong {
+  color: var(--gold-light, #e9d4a8);
+  font-family: 'Playfair Display', serif;
+  font-size: 1rem;
+}
+
+.adm-appointment-card-head small {
+  margin-top: 0.22rem;
+  color: rgba(244, 234, 217, 0.66);
+  font-size: 0.76rem;
+}
+
+.adm-appointment-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+  padding: 0.85rem 0;
+}
+
+.adm-appointment-card-field {
+  min-width: 0;
+}
+
+.adm-appointment-card-field--wide {
+  grid-column: 1 / -1;
+}
+
+.adm-appointment-card-field span,
+.adm-appointment-card-field strong {
+  display: block;
+}
+
+.adm-appointment-card-field span {
+  margin-bottom: 0.18rem;
+  color: var(--gold-deep, #9c7b3f);
+  font-size: 0.63rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.adm-appointment-card-field strong {
+  color: rgba(244, 234, 217, 0.84);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.adm-appointment-card-actions {
+  flex-wrap: wrap;
+  margin-top: 0.9rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line-soft, rgba(201, 168, 118, 0.14));
+}
+
 .adm-booking-reference {
   color: var(--gold, #c9a876);
   font-size: 0.7rem;
@@ -1226,6 +1347,175 @@
 .adm-inline-status {
   color: var(--gold-light, #e9d4a8);
   font-size: 0.8rem;
+}
+
+.adm-settings-intro {
+  border-color: rgba(201, 168, 118, 0.48);
+  background: linear-gradient(135deg, rgba(201, 168, 118, 0.09), rgba(16, 12, 10, 0.96));
+}
+
+.adm-settings-kicker {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--gold, #c9a876);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.adm-hours-table,
+.adm-blackout-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.adm-hours-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(120px, 0.85fr) repeat(2, minmax(125px, 1fr));
+  align-items: end;
+  gap: 0.8rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(201, 168, 118, 0.14);
+}
+
+.adm-hours-row > strong {
+  align-self: center;
+  color: var(--cream, #f4ead9);
+}
+
+.adm-hours-row .adm-toggle-field {
+  align-self: center;
+}
+
+.adm-blackout-editor {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.65fr) minmax(220px, 1.35fr) auto;
+  align-items: end;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.adm-blackout-item,
+.adm-settings-savebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.adm-blackout-item {
+  padding: 0.8rem 0.9rem;
+  border: 1px solid rgba(201, 168, 118, 0.18);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.adm-blackout-item > div,
+.adm-settings-info,
+.adm-settings-savebar > div:first-child {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.adm-blackout-item span,
+.adm-settings-info span,
+.adm-settings-info small,
+.adm-settings-savebar span,
+.adm-empty-copy {
+  color: var(--muted, #a89c8b);
+  font-size: 0.78rem;
+}
+
+.adm-settings-info,
+.adm-checklist {
+  margin: 0;
+  padding: 1rem;
+  border: 1px solid rgba(201, 168, 118, 0.2);
+  background: rgba(201, 168, 118, 0.045);
+}
+
+.adm-checklist legend {
+  padding: 0 0.35rem;
+  color: var(--gold-light, #e9d4a8);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.adm-checklist .adm-toggle-field {
+  min-height: 34px;
+}
+
+.adm-settings-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem 1rem;
+}
+
+.adm-settings-savebar {
+  position: sticky;
+  bottom: 1rem;
+  z-index: 4;
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(201, 168, 118, 0.45);
+  background: rgba(20, 15, 12, 0.96);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px);
+}
+
+.adm-settings-savebar strong {
+  color: var(--cream, #f4ead9);
+}
+
+.adm-request-panel {
+  border-color: rgba(201, 168, 118, 0.42);
+}
+
+.adm-request-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.adm-request-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(201, 168, 118, 0.2);
+  background: rgba(201, 168, 118, 0.04);
+}
+
+.adm-request-copy {
+  min-width: 0;
+}
+
+.adm-request-copy > strong,
+.adm-request-copy p,
+.adm-request-copy small {
+  display: block;
+}
+
+.adm-request-copy > strong {
+  color: var(--cream, #f4ead9);
+}
+
+.adm-request-copy p {
+  margin: 0.3rem 0 0;
+  color: var(--muted, #a89c8b);
+  font-size: 0.78rem;
+}
+
+.adm-request-copy small {
+  margin-top: 0.45rem;
+  color: rgba(201, 168, 118, 0.72);
+}
+
+.adm-request-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.5rem;
 }
 
 /* ============================================================
@@ -2100,6 +2390,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .adm-hours-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .adm-customer-table-wrap {
     display: none;
   }
@@ -2123,8 +2417,31 @@
   }
 
   .adm-appointment-tools,
-  .adm-settings-grid {
+  .adm-settings-grid,
+  .adm-hours-row,
+  .adm-blackout-editor,
+  .adm-settings-toggle-grid {
     grid-template-columns: 1fr;
+  }
+
+  .adm-settings-savebar {
+    align-items: stretch;
+    flex-direction: column;
+    bottom: 0.5rem;
+  }
+
+  .adm-settings-savebar .adm-form-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .adm-request-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .adm-request-actions .adm-btn {
+    flex: 1;
   }
 
   .adm-settings-wide {
@@ -2133,6 +2450,15 @@
 
   .adm-table-wrap {
     display: none;
+  }
+
+  .adm-appointment-cards {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .adm-booking-created-at {
+    white-space: normal;
   }
 
   .adm-customer-cards {

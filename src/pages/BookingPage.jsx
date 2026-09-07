@@ -1,7 +1,7 @@
 import BookingCalendar from '../components/BookingCalendar';
 import LuxeDynamicBackground from '../components/LuxeDynamicBackground';
 
-function BookingPage({ defaultService, user, onViewBookings, onBackHome, onEditProfile }) {
+function BookingPage({ defaultService, user, onViewBookings, onBackHome, onEditProfile, businessSettings, rescheduleBooking }) {
   return (
     <main className="booking-page booking-page-modern">
       <LuxeDynamicBackground className="customer-page-waves" />
@@ -20,6 +20,8 @@ function BookingPage({ defaultService, user, onViewBookings, onBackHome, onEditP
           onViewBookings={onViewBookings}
           onBackHome={onBackHome}
           onEditProfile={onEditProfile}
+          businessSettings={businessSettings}
+          rescheduleBooking={rescheduleBooking}
         />
       </section>
     </main>

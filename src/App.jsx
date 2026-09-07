@@ -1,9 +1,10 @@
 import { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import Navbar from './components/Navbar';
-import { subscribeToAuthChanges, logOut, createOrUpdateCustomerRecord, getCustomerProfile, updateUserStatus, resolveUserAuthorization, listenToPortfolio, listenToBusinessSettings, listenToUserBookings, listenToCustomerNotifications, markCustomerNotificationsRead, addPortfolioItem, updatePortfolioItem, deletePortfolioItem, prepareImageForUpload, uploadImageFile } from './firebase';
+import { subscribeToAuthChanges, logOut, createOrUpdateCustomerRecord, getCustomerProfile, updateUserStatus, resolveUserAuthorization, listenToPortfolio, listenToBusinessSettings, listenToUserBookings, listenToCustomerNotifications, markCustomerNotificationsRead, addPortfolioItem, updatePortfolioItem, deletePortfolioItem, uploadImageFile } from './firebase';
 import { SERVICES } from './constants/services';
 import { isValidPhoneNumber } from './validation';
 import { createServiceBookingSelection, getBookingNailArt, serviceSupportsNailArt } from './bookingPricing';
+import { normalizeBusinessSettings } from './businessSettings';
 
 const HomePage = lazy(() => import('./pages/HomePage'));
 const BookingPage = lazy(() => import('./pages/BookingPage'));
@@ -104,6 +105,7 @@ async function uploadPortfolioImages(file, progressCallback) {
     }, { maxDimension: 720, quality: 0.84 });
   } catch (error) {
     console.warn('Portfolio thumbnail upload failed; using the optimized full image.', error);
+    progressCallback?.(100);
   }
 
   return { image, thumbnail };
@@ -112,8 +114,9 @@ async function uploadPortfolioImages(file, progressCallback) {
 function App() {
   const [currentPage, setCurrentPage] = useState('home');
   const [selectedService, setSelectedService] = useState(null);
+  const [rescheduleBooking, setRescheduleBooking] = useState(null);
   const [works, setWorks] = useState([]);
-  const [businessInfo, setBusinessInfo] = useState({});
+  const [businessInfo, setBusinessInfo] = useState(() => normalizeBusinessSettings());
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
@@ -173,19 +176,6 @@ function App() {
     }
   };
 
-  // Convert a File to a data URL (used as fallback when Storage isn't configured)
-  const fileToDataUrl = (file) => new Promise((resolve, reject) => {
-    if (!file) return resolve('');
-    try {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = (e) => reject(e);
-      reader.readAsDataURL(file);
-    } catch (error) {
-      reject(error);
-    }
-  });
-
   const handleAddWork = async (newWork, progressCallback) => {
     const newPosition = works.length > 0 ? Math.max(...works.map((work) => Number(work.position) || 0)) + 1 : 0;
     const itemToSave = { ...newWork, position: newPosition };
@@ -193,21 +183,9 @@ function App() {
     try {
       const file = itemToSave.imageFile;
       if (file instanceof File) {
-        try {
-          const uploadedImages = await uploadPortfolioImages(file, progressCallback);
-          itemToSave.image = uploadedImages.image;
-          itemToSave.thumbnail = uploadedImages.thumbnail;
-        } catch (err) {
-          console.error('Background upload failed, attempting data-URL fallback:', err);
-          try {
-            const optimizedFile = await prepareImageForUpload(file, 'portfolio');
-            itemToSave.image = await fileToDataUrl(optimizedFile);
-            itemToSave.thumbnail = itemToSave.image;
-          } catch (rerr) {
-            console.error('Failed to create data-URL fallback:', rerr);
-            throw err;
-          }
-        }
+        const uploadedImages = await uploadPortfolioImages(file, progressCallback);
+        itemToSave.image = uploadedImages.image;
+        itemToSave.thumbnail = uploadedImages.thumbnail;
       }
       delete itemToSave.imageFile;
       await addPortfolioItem(itemToSave);
@@ -239,22 +217,9 @@ function App() {
       // If there's an imageFile, keep preview in place and upload in background
       const file = updatesToSave.imageFile;
       if (file instanceof File) {
-        // if caller provided a preview string, keep it for immediate display
-        try {
-          const uploadedImages = await uploadPortfolioImages(file, progressCallback);
-          updatesToSave.image = uploadedImages.image;
-          updatesToSave.thumbnail = uploadedImages.thumbnail;
-        } catch (err) {
-          console.error('Update background upload failed, attempting data-URL fallback:', err);
-          try {
-            const optimizedFile = await prepareImageForUpload(file, 'portfolio');
-            updatesToSave.image = await fileToDataUrl(optimizedFile);
-            updatesToSave.thumbnail = updatesToSave.image;
-          } catch (rerr) {
-            console.error('Failed to create data-URL fallback during update:', rerr);
-            throw err;
-          }
-        }
+        const uploadedImages = await uploadPortfolioImages(file, progressCallback);
+        updatesToSave.image = uploadedImages.image;
+        updatesToSave.thumbnail = uploadedImages.thumbnail;
       }
 
       // no file — normal update
@@ -425,17 +390,12 @@ function App() {
   }, [currentPage, isAdmin]);
 
   useEffect(() => {
-    if (isAdmin || !['home', 'portfolio'].includes(currentPage)) return undefined;
     return listenToBusinessSettings((settings) => {
-      setBusinessInfo({
-        ...settings,
-        location: settings?.location || settings?.address || '',
-        hours: settings?.hours || settings?.businessHours || '',
-      });
-    }, (error) => {
-      console.warn('Business settings realtime listener failed:', error);
+      setBusinessInfo(normalizeBusinessSettings(settings));
+    }, () => {
+      setBusinessInfo(normalizeBusinessSettings());
     });
-  }, [currentPage, isAdmin]);
+  }, []);
 
   useEffect(() => {
     if (!isSignedIn || isAdmin || !user?.uid) {
@@ -455,11 +415,11 @@ function App() {
         setCustomerBookings(bookings);
         const storedNotifications = readCustomerNotifications(uid);
         const knownNotificationIds = new Set(storedNotifications.map((notification) => notification.id));
-        const newNotifications = bookings
+        const newNotifications = businessInfo.bookingConfirmationNotificationEnabled ? bookings
           .filter((booking) => booking.id && booking.status === 'Confirmed')
           .map(createBookingConfirmationNotification)
           .filter((notification) => !knownNotificationIds.has(notification.id))
-          .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+          .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))) : [];
 
         if (!newNotifications.length) return;
 
@@ -475,7 +435,7 @@ function App() {
     );
 
     return () => unsubscribe();
-  }, [isSignedIn, isAdmin, user?.uid]);
+  }, [businessInfo.bookingConfirmationNotificationEnabled, isSignedIn, isAdmin, user?.uid]);
 
   useEffect(() => {
     if (!isSignedIn || isAdmin || !user?.uid) {
@@ -513,6 +473,7 @@ function App() {
 
   const goToBooking = (service) => {
     setSelectedService(service || null);
+    setRescheduleBooking(null);
 
     if (!authReady || !isSignedIn) {
       setPendingBooking(true);
@@ -635,6 +596,20 @@ function App() {
     setAuthErrorMessage('');
   };
 
+  const handleRescheduleBooking = (booking) => {
+    const bookingService = SERVICES.find((serviceItem) => serviceItem.id === booking?.service);
+    if (!bookingService || !booking?.id) return;
+    setSelectedService({
+      ...bookingService,
+      nailQuantity: booking?.nailQuantity ?? booking?.repairNailsCount ?? 1,
+      nailArt: getBookingNailArt(booking, bookingService),
+      referenceImageUrl: booking.referenceImageUrl || '',
+      skipServiceStep: true,
+    });
+    setRescheduleBooking(booking);
+    setCurrentPage('booking');
+  };
+
   useEffect(() => {
     if (!user || !isSignedIn) return undefined;
 
@@ -693,9 +668,11 @@ function App() {
           <BookingPage
             defaultService={selectedService}
             user={user}
-            onViewBookings={() => handleNavigate('profile')}
-            onBackHome={() => handleNavigate('home')}
-            onEditProfile={() => handleNavigate('profile')}
+            businessSettings={businessInfo}
+            rescheduleBooking={rescheduleBooking}
+            onViewBookings={() => { setRescheduleBooking(null); handleNavigate('profile'); }}
+            onBackHome={() => { setRescheduleBooking(null); handleNavigate('home'); }}
+            onEditProfile={() => { setRescheduleBooking(null); handleNavigate('profile'); }}
           />
         );
       case 'admin':
@@ -709,6 +686,7 @@ function App() {
             onSignOut={handleSignOut}
             onViewProfile={handleViewProfile}
             onToggleUserStatus={handleToggleUserStatus}
+            businessSettings={businessInfo}
           />
         ) : isSignedIn ? (
           <HomePage onBookService={goToBooking} onViewPortfolio={goToPortfolio} works={works} businessInfo={businessInfo} />
@@ -731,6 +709,8 @@ function App() {
             onProfileUpdated={handleProfileUpdated}
             onBookAppointment={() => handleNavigate('booking')}
             onBookAgain={handleBookAgain}
+            onRescheduleAppointment={handleRescheduleBooking}
+            businessSettings={businessInfo}
           />
         );
       default:
@@ -744,6 +724,7 @@ function App() {
             onSignOut={handleSignOut}
             onViewProfile={handleViewProfile}
             onToggleUserStatus={handleToggleUserStatus}
+            businessSettings={businessInfo}
           />
         ) : (
           <HomePage onBookService={goToBooking} onViewPortfolio={goToPortfolio} works={works} businessInfo={businessInfo} />

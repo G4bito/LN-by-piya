@@ -13,6 +13,13 @@ export function getAdminAuthorizationFromRecord(record, uid, email) {
   };
 }
 
+export function isFirebasePermissionDenied(error) {
+  const details = `${error?.code || ''} ${error?.message || ''}`.trim().toLowerCase();
+  return details.includes('permission_denied')
+    || details.includes('permission-denied')
+    || details.includes('permission denied');
+}
+
 export function getPostAuthDestination({ isAdmin = false, pendingBooking = false } = {}) {
   if (isAdmin === true) return 'admin';
   return pendingBooking ? 'booking' : 'home';

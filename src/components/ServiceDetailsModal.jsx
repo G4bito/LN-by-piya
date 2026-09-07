@@ -1,7 +1,9 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { uploadImageFile } from '../firebase';
+import { getImageFileValidationError, uploadImageFile } from '../firebase';
+import { formatFileSize } from '../imageUploadConfig';
 import { formatPeso, NAIL_ART_ADD_ON } from '../constants/services';
+import { normalizeBusinessSettings } from '../businessSettings';
 import {
   clampNailQuantity,
   createServiceBookingSelection,
@@ -11,7 +13,6 @@ import {
 } from '../bookingPricing';
 
 const NAIL_QUANTITIES = Array.from({ length: 10 }, (_, index) => index + 1);
-const MAX_REFERENCE_FILE_SIZE = 8 * 1024 * 1024;
 const FOCUSABLE_SELECTOR = [
   'button:not([disabled])',
   'input:not([disabled])',
@@ -28,7 +29,9 @@ export default function ServiceDetailsModal({
   initialQuantity = 1,
   initialNailArt,
   initialReferenceImageUrl = '',
+  businessSettings,
 }) {
+  const settings = useMemo(() => normalizeBusinessSettings(businessSettings), [businessSettings]);
   const fileInputId = useId();
   const dialogRef = useRef(null);
   const contentRef = useRef(null);
@@ -40,7 +43,7 @@ export default function ServiceDetailsModal({
   const isBookingRef = useRef(false);
   const [baseQuantity, setBaseQuantity] = useState(clampNailQuantity(initialQuantity));
   const [nailArtEnabled, setNailArtEnabled] = useState(initialNailArt?.enabled === true);
-  const [nailArtQuantity, setNailArtQuantity] = useState(clampNailQuantity(initialNailArt?.quantity || 1));
+  const [nailArtQuantity, setNailArtQuantity] = useState(clampNailQuantity(initialNailArt?.quantity || 1, settings.maximumNailArtQuantity));
   const [referenceFile, setReferenceFile] = useState(null);
   const [referenceImageUrl, setReferenceImageUrl] = useState(initialReferenceImageUrl);
   const [previewUrl, setPreviewUrl] = useState(initialReferenceImageUrl);
@@ -63,11 +66,12 @@ export default function ServiceDetailsModal({
       objectUrlRef.current = '';
     }
     setBaseQuantity(clampNailQuantity(initialQuantity));
-    setNailArtEnabled(serviceSupportsNailArt(service) && initialNailArt?.enabled === true);
-    setNailArtQuantity(clampNailQuantity(initialNailArt?.quantity || 1));
+    setNailArtEnabled(serviceSupportsNailArt(service, settings) && initialNailArt?.enabled === true);
+    setNailArtQuantity(clampNailQuantity(initialNailArt?.quantity || 1, settings.maximumNailArtQuantity));
     setReferenceFile(null);
-    setReferenceImageUrl(initialReferenceImageUrl || '');
-    setPreviewUrl(initialReferenceImageUrl || '');
+    const savedReferenceUrl = settings.allowReferencePhoto ? initialReferenceImageUrl || '' : '';
+    setReferenceImageUrl(savedReferenceUrl);
+    setPreviewUrl(savedReferenceUrl);
     setUploadProgress(0);
     setUploadError('');
     setIsBooking(false);
@@ -75,7 +79,7 @@ export default function ServiceDetailsModal({
       contentRef.current.scrollTop = 0;
       contentRef.current.scrollLeft = 0;
     }
-  }, [initialNailArt?.enabled, initialNailArt?.quantity, initialQuantity, initialReferenceImageUrl, service]);
+  }, [initialNailArt?.enabled, initialNailArt?.quantity, initialQuantity, initialReferenceImageUrl, service, settings.allowReferencePhoto, settings.maximumNailArtQuantity, settings.nailArtEligibleServiceIds]);
 
   useEffect(() => {
     if (!service) return undefined;
@@ -130,11 +134,12 @@ export default function ServiceDetailsModal({
   if (!service || typeof document === 'undefined') return null;
 
   const requiresBaseQuantity = serviceRequiresNailQuantity(service);
-  const supportsNailArt = serviceSupportsNailArt(service);
+  const supportsNailArt = serviceSupportsNailArt(service, settings);
+  const nailArtQuantities = Array.from({ length: settings.maximumNailArtQuantity }, (_, index) => index + 1);
   const pricingFields = createServicePricingFields(service, baseQuantity, {
     enabled: nailArtEnabled,
     quantity: nailArtQuantity,
-  });
+  }, settings);
   const hasReference = Boolean(referenceFile || referenceImageUrl);
 
   const replacePreviewUrl = (file) => {
@@ -147,12 +152,15 @@ export default function ServiceDetailsModal({
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setUploadError('Please choose an image file.');
-      return;
-    }
-    if (file.size > MAX_REFERENCE_FILE_SIZE) {
-      setUploadError('Please choose an image smaller than 8 MB.');
+    const validationError = getImageFileValidationError(file, 'booking-references');
+    if (validationError) {
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = '';
+      setReferenceFile(null);
+      setReferenceImageUrl('');
+      setPreviewUrl('');
+      setUploadProgress(0);
+      setUploadError(validationError);
       return;
     }
 
@@ -183,7 +191,7 @@ export default function ServiceDetailsModal({
     setUploadError('');
     let savedReferenceUrl = referenceImageUrl;
 
-    if (referenceFile) {
+    if (settings.allowReferencePhoto && referenceFile) {
       try {
         savedReferenceUrl = await uploadImageFile(referenceFile, 'booking-references', setUploadProgress);
       } catch (error) {
@@ -199,7 +207,8 @@ export default function ServiceDetailsModal({
         enabled: nailArtEnabled,
         quantity: nailArtQuantity,
       },
-      referenceImageUrl: savedReferenceUrl,
+      referenceImageUrl: settings.allowReferencePhoto ? savedReferenceUrl : '',
+      settings,
     });
     onBookService?.(selection);
     onCloseRef.current?.();
@@ -299,7 +308,7 @@ export default function ServiceDetailsModal({
                   onClick={() => setNailArtEnabled(true)}
                   aria-pressed={nailArtEnabled}
                 >
-                  Add Nail Art <span>{formatPeso(NAIL_ART_ADD_ON.pricePerNail)} / nail</span>
+                  Add Nail Art <span>{formatPeso(settings.nailArtPricePerNail)} / nail</span>
                 </button>
               </div>
 
@@ -307,13 +316,13 @@ export default function ServiceDetailsModal({
                 <div className="nail-art-customization">
                   <div className="nail-art-heading">
                     <strong>{NAIL_ART_ADD_ON.title}</strong>
-                    <span>{formatPeso(NAIL_ART_ADD_ON.pricePerNail)} per nail</span>
+                    <span>{formatPeso(settings.nailArtPricePerNail)} per nail</span>
                   </div>
                   <p>{NAIL_ART_ADD_ON.description}</p>
                   <fieldset className="service-quantity-fieldset">
                     <legend>Number of nails</legend>
                     <div className="service-quantity-grid">
-                      {NAIL_QUANTITIES.map((quantity) => (
+                      {nailArtQuantities.map((quantity) => (
                         <button
                           type="button"
                           key={quantity}
@@ -327,7 +336,7 @@ export default function ServiceDetailsModal({
                     </div>
                   </fieldset>
                   <div className="service-details-summary nail-art-price-summary">
-                    <div className="review-row"><span>Price per nail</span><strong>{formatPeso(NAIL_ART_ADD_ON.pricePerNail)}</strong></div>
+                    <div className="review-row"><span>Price per nail</span><strong>{formatPeso(settings.nailArtPricePerNail)}</strong></div>
                     <div className="review-row"><span>Selected</span><strong>{pricingFields.nailArt.quantity} {pricingFields.nailArt.quantity === 1 ? 'nail' : 'nails'}</strong></div>
                     <div className="review-row total"><span>Nail Art add-on</span><strong>{formatPeso(pricingFields.nailArt.total)}</strong></div>
                   </div>
@@ -335,7 +344,7 @@ export default function ServiceDetailsModal({
                 </div>
               ) : null}
 
-              <div className="service-reference-section">
+              {settings.allowReferencePhoto ? <div className="service-reference-section">
                 <div className="service-reference-heading">
                   <div>
                     <strong>Set Reference Photo</strong>
@@ -360,13 +369,18 @@ export default function ServiceDetailsModal({
                   ref={fileInputRef}
                   className="service-reference-input"
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/jpg,image/png,image/webp"
                   tabIndex="-1"
                   onChange={handleReferenceChange}
+                  disabled={isBooking}
                 />
+                <p className="service-upload-help">JPG, PNG or WebP • Max 5 MB</p>
+                {referenceFile ? (
+                  <p className="service-selected-file">{referenceFile.name} • {formatFileSize(referenceFile.size)}</p>
+                ) : null}
                 {uploadProgress > 0 && uploadProgress < 100 ? <p className="service-upload-status">Uploading reference photo: {uploadProgress}%</p> : null}
                 {uploadError ? <p className="service-upload-error" role="alert">{uploadError}</p> : null}
-              </div>
+              </div> : null}
             </section>
           ) : null}
 
@@ -375,9 +389,9 @@ export default function ServiceDetailsModal({
             <div className="review-row"><span>Base price</span><strong>{formatPeso(pricingFields.baseTotal)}{requiresBaseQuantity ? ` (${baseQuantity} nails)` : ''}</strong></div>
             {supportsNailArt ? (
               <>
-                <div className="review-row"><span>Nail Art</span><strong>{pricingFields.nailArt.enabled ? `${pricingFields.nailArt.quantity} nails x ${formatPeso(NAIL_ART_ADD_ON.pricePerNail)}` : 'None'}</strong></div>
+                <div className="review-row"><span>Nail Art</span><strong>{pricingFields.nailArt.enabled ? `${pricingFields.nailArt.quantity} nails x ${formatPeso(settings.nailArtPricePerNail)}` : 'None'}</strong></div>
                 {pricingFields.nailArt.enabled ? <div className="review-row"><span>Nail Art add-on</span><strong>{formatPeso(pricingFields.nailArt.total)}</strong></div> : null}
-                <div className="review-row"><span>Reference photo</span><strong>{hasReference ? 'Attached ✓' : 'Not attached'}</strong></div>
+                {settings.allowReferencePhoto ? <div className="review-row"><span>Reference photo</span><strong>{hasReference ? 'Attached ✓' : 'Not attached'}</strong></div> : null}
               </>
             ) : null}
             <div className="review-row total"><span>Estimated total</span><strong>{formatPeso(pricingFields.estimatedTotal)}</strong></div>

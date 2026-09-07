@@ -83,7 +83,7 @@ export function getAppointmentTimeMinutes(value) {
   const period = match[3]?.toUpperCase();
   if (period === 'PM' && hour < 12) hour += 12;
   if (period === 'AM' && hour === 12) hour = 0;
-  if (!period && hour > 0 && hour < 9) hour += 12;
+  if (!period && match[1].length === 1 && hour > 0 && hour < 9) hour += 12;
   return (hour * 60) + minute;
 }
 
@@ -91,6 +91,71 @@ export function compareAppointments(left, right) {
   const dateDifference = String(left?.date || '').localeCompare(String(right?.date || ''));
   if (dateDifference !== 0) return dateDifference;
   return getAppointmentTimeMinutes(left?.time) - getAppointmentTimeMinutes(right?.time);
+}
+
+export function getBookingCreatedAtTime(value) {
+  const createdAt = value && typeof value === 'object' && !(value instanceof Date)
+    ? value.createdAt
+    : value;
+  if (createdAt == null || createdAt === '') return null;
+
+  let date;
+  if (createdAt instanceof Date) {
+    date = createdAt;
+  } else if (typeof createdAt === 'number') {
+    date = new Date(createdAt);
+  } else {
+    const normalized = String(createdAt).trim();
+    if (!normalized) return null;
+    date = /^\d+$/.test(normalized) ? new Date(Number(normalized)) : new Date(normalized);
+  }
+
+  const timestamp = date.getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+export function formatBookingCreatedAt(value, timeZone = 'Asia/Manila') {
+  const timestamp = getBookingCreatedAtTime(value);
+  if (timestamp == null) return '';
+
+  const date = new Date(timestamp);
+  const formatWithTimeZone = (zone) => {
+    const dateLabel = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(date);
+    const timeLabel = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone,
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(date);
+    return `${dateLabel} · ${timeLabel}`;
+  };
+
+  try {
+    return formatWithTimeZone(timeZone || 'Asia/Manila');
+  } catch {
+    try {
+      return formatWithTimeZone('Asia/Manila');
+    } catch {
+      return '';
+    }
+  }
+}
+
+export function compareBookingsByCreatedAt(left, right, direction = 'asc') {
+  const leftTimestamp = getBookingCreatedAtTime(left);
+  const rightTimestamp = getBookingCreatedAtTime(right);
+  if (leftTimestamp == null && rightTimestamp == null) return compareAppointments(left, right);
+  if (leftTimestamp == null) return 1;
+  if (rightTimestamp == null) return -1;
+
+  const timestampDifference = direction === 'desc'
+    ? rightTimestamp - leftTimestamp
+    : leftTimestamp - rightTimestamp;
+  return timestampDifference || compareAppointments(left, right);
 }
 
 export function matchesAppointmentFilter(booking, filter, todayKey, selectedDate = '') {

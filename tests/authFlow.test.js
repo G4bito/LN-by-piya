@@ -4,6 +4,7 @@ import {
   getAdminAuthorizationFromRecord,
   getGoogleAuthErrorMessage,
   getPostAuthDestination,
+  isFirebasePermissionDenied,
 } from '../src/authFlow.js';
 
 test('a customer authenticated from the shared login route goes directly home', () => {
@@ -47,6 +48,12 @@ test('matching a public admin email cannot authorize a customer UID', () => {
     email: 'admin@luxenails.test',
     adminEmail: 'admin@luxenails.test',
   }), 'home');
+});
+
+test('a missing Admin record can be recognized from Firebase permission errors', () => {
+  assert.equal(isFirebasePermissionDenied({ code: 'database/permission-denied' }), true);
+  assert.equal(isFirebasePermissionDenied({ message: 'Permission denied' }), true);
+  assert.equal(isFirebasePermissionDenied({ code: 'database/network-error' }), false);
 });
 
 test('Google popup errors produce helpful customer-facing messages', () => {

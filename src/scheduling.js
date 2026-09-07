@@ -21,7 +21,7 @@ export function getTimeMinutes(value) {
   const period = match[3]?.toUpperCase();
   if (period === 'PM' && hour < 12) hour += 12;
   if (period === 'AM' && hour === 12) hour = 0;
-  if (!period && hour > 0 && hour < 9) hour += 12;
+  if (!period && match[1].length === 1 && hour > 0 && hour < 9) hour += 12;
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
   return (hour * 60) + minute;
 }
@@ -56,8 +56,9 @@ export function getAppointmentInterval(appointment) {
   return { startMinutes, endMinutes, durationMinutes };
 }
 
-export function intervalsOverlap(left, right) {
-  return left.startMinutes < right.endMinutes && left.endMinutes > right.startMinutes;
+export function intervalsOverlap(left, right, bufferMinutes = 0) {
+  const buffer = Math.max(0, Number(bufferMinutes) || 0);
+  return left.startMinutes < right.endMinutes + buffer && left.endMinutes + buffer > right.startMinutes;
 }
 
 export function isConfirmedScheduleStatus(status) {
@@ -102,7 +103,7 @@ export function hasScheduleConflict(request, entries = [], options = {}) {
     if (!entry || entryBookingId === excludeBookingId || entry.date !== request.date) return false;
     if (!isBlockingScheduleEntry(entry, options)) return false;
     const entryInterval = getAppointmentInterval(entry);
-    return Boolean(entryInterval && intervalsOverlap(requestInterval, entryInterval));
+    return Boolean(entryInterval && intervalsOverlap(requestInterval, entryInterval, options.bufferMinutes));
   });
 }
 

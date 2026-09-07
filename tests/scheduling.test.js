@@ -20,6 +20,8 @@ test('service duration uses the longest duration already configured for the serv
 test('interval overlap uses end boundaries correctly', () => {
   assert.equal(intervalsOverlap({ startMinutes: 600, endMinutes: 720 }, { startMinutes: 660, endMinutes: 750 }), true);
   assert.equal(intervalsOverlap({ startMinutes: 600, endMinutes: 720 }, { startMinutes: 720, endMinutes: 780 }), false);
+  assert.equal(intervalsOverlap({ startMinutes: 600, endMinutes: 720 }, { startMinutes: 735, endMinutes: 780 }, 15), false);
+  assert.equal(intervalsOverlap({ startMinutes: 600, endMinutes: 720 }, { startMinutes: 734, endMinutes: 780 }, 15), true);
 });
 
 test('a confirmed two-hour appointment disables every overlapping start time', () => {

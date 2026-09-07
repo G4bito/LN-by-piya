@@ -8,6 +8,7 @@ export default function Services({
   id,
   showPricing = false,
   showDetailsAction = false,
+  businessSettings,
 }) {
   const [detailService, setDetailService] = useState(null);
 
@@ -47,6 +48,7 @@ export default function Services({
         service={detailService}
         onClose={() => setDetailService(null)}
         onBookService={onBookService}
+        businessSettings={businessSettings}
       />
     </section>
   );

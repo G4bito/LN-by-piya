@@ -87,7 +87,7 @@ test('Repair remains a per-nail base service and carries its own quantity', () =
   assert.equal(selection.nailArt.enabled, false);
 });
 
-test('booking history normalizes saved customization to the current 49 peso rate', () => {
+test('booking history preserves the Nail Art rate charged when the booking was created', () => {
   const gelManicure = SERVICES.find((service) => service.id === 'gel-manicure');
   const nailArt = getBookingNailArt({
     service: 'gel-manicure',
@@ -96,10 +96,25 @@ test('booking history normalizes saved customization to the current 49 peso rate
 
   assert.deepEqual(nailArt, {
     enabled: true,
-    pricePerNail: 49,
+    pricePerNail: 75,
     quantity: 5,
-    total: 245,
+    total: 375,
   });
   assert.equal(getBookingNailQuantity({ service: 'repair', nailQuantity: 8 }), 8);
   assert.equal(getBookingNailQuantity({ service: 'gel-manicure', nailQuantity: 8 }), null);
+});
+
+test('configured Nail Art price, quantity, and eligible services drive booking totals', () => {
+  const gel = SERVICES.find((service) => service.id === 'gel-manicure');
+  const settings = {
+    nailArtPricePerNail: 59,
+    maximumNailArtQuantity: 5,
+    nailArtEligibleServiceIds: ['gel-manicure'],
+  };
+  const pricing = createServicePricingFields(gel, 1, { enabled: true, quantity: 8 }, settings);
+
+  assert.equal(pricing.nailArt.pricePerNail, 59);
+  assert.equal(pricing.nailArt.quantity, 5);
+  assert.equal(pricing.nailArt.total, 295);
+  assert.equal(pricing.estimatedTotal, gel.price + 295);
 });

@@ -2,25 +2,30 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   claimCustomerLoyaltyReward,
   createLoyaltyRewardId,
+  getImageFileValidationError,
+  getImageUploadErrorMessage,
   listenToBookings,
-  listenToBusinessSettings,
+  listenToAppointmentChangeRequests,
   listenToLoyaltyProgram,
   listenToUsers,
   markBookingSeen,
   saveLoyaltyProgram,
   saveBusinessSettings,
+  reviewAppointmentChangeRequest,
   syncConfirmedScheduleSlots,
   updateBookingStatus,
 } from '../firebase';
 import { getBookingNailArt, getBookingNailQuantity } from '../bookingPricing';
-import { formatPeso, NAIL_ART_ADD_ON, SERVICES } from '../constants/services';
+import { formatPeso, SERVICES } from '../constants/services';
 import {
   ADMIN_BOOKING_STATUSES,
   ADMIN_NAV_ITEMS,
   ADMIN_PAGE_TITLES,
   APPOINTMENT_FILTERS,
   compareAppointments,
+  compareBookingsByCreatedAt,
   findAppointmentConflicts,
+  formatBookingCreatedAt,
   getCustomerAppointmentSummary,
   getLocalDateKey,
   isCancelledBooking,
@@ -28,6 +33,13 @@ import {
   normalizeBookingStatus,
 } from '../adminData';
 import { DEFAULT_LOYALTY_REWARDS, LOYALTY_REWARD_TYPES } from '../loyaltyProgram';
+import { formatFileSize } from '../imageUploadConfig';
+import {
+  BUSINESS_WEEKDAYS,
+  DEFAULT_BUSINESS_SETTINGS,
+  getBusinessSettingsPatch,
+  normalizeBusinessSettings,
+} from '../businessSettings';
 import { SCHEDULE_CONFLICT_CODE } from '../scheduling';
 import './AdminDashboard.css';
 
@@ -99,7 +111,7 @@ function getBookingServiceLabel(booking) {
 function getNailArtSummary(booking) {
   const nailArt = getBookingNailArt(booking, getBookingService(booking));
   return nailArt.enabled
-    ? `Nail Art: ${nailArt.quantity} nails × ${formatPeso(NAIL_ART_ADD_ON.pricePerNail)} = ${formatPeso(nailArt.total)}`
+    ? `Nail Art: ${nailArt.quantity} nails × ${formatPeso(nailArt.pricePerNail)} = ${formatPeso(nailArt.total)}`
     : '';
 }
 
@@ -144,7 +156,7 @@ function formatTime(value) {
   const minute = match[2] || '00';
   let period = match[3]?.toUpperCase();
   if (!period) {
-    if (hour > 0 && hour < 9) hour += 12;
+    if (match[1].length === 1 && hour > 0 && hour < 9) hour += 12;
     period = hour >= 12 ? 'PM' : 'AM';
   }
   hour %= 12;
@@ -235,29 +247,10 @@ function cx(...args) {
 }
 
 const PAGE_SIZE = 8;
-const PORTFOLIO_STYLE_OPTIONS = ['French Tips', 'French Ombre', 'Ombre', 'Chrome', 'Floral', 'Minimalist', 'Classic', 'Abstract', 'Glitter'];
+const PORTFOLIO_STYLE_OPTIONS = ['French Tips', 'Embosed', 'Ombre', 'Chrome', 'Floral', 'Minimalist', 'Plain', 'Hand Paint', 'Glitter', 'Cat Eye'];
 const NAIL_SHAPE_OPTIONS = ['Round', 'Oval', 'Almond', 'Square', 'Coffin', 'Stiletto'];
 const NAIL_LENGTH_OPTIONS = ['Short', 'Medium', 'Long', 'Extra Long'];
 const NAIL_FINISH_OPTIONS = ['Glossy', 'Matte', 'Chrome', 'Glitter', 'Cat Eye'];
-const DEFAULT_BUSINESS_SETTINGS = {
-  businessName: 'Luxe Nails by Piya',
-  phone: '',
-  email: '',
-  address: '',
-  facebookUrl: '',
-  instagramUrl: '',
-  businessHours: '',
-  timezone: 'Asia/Manila',
-  bookingInterval: 30,
-  minimumNoticeHours: 2,
-  maximumAdvanceDays: 60,
-  cancellationPolicy: '',
-  lateArrivalPolicy: '',
-  nailArtPricePerNail: NAIL_ART_ADD_ON.pricePerNail,
-  reminder24hEnabled: true,
-  reminder12hEnabled: true,
-};
-
 function buildPortfolioOptions(defaultOptions, works, field, currentValue) {
   const options = new Set(defaultOptions);
   works.forEach((work) => {
@@ -280,6 +273,7 @@ function AdminPage({
   onEditUser,
   onToggleUserStatus,
   onDeleteUser,
+  businessSettings: businessSettingsProp,
 }) {
   /* ---------------- shell / navigation state ---------------- */
   const [activeTab, setActiveTab] = useState('overview');
@@ -297,6 +291,8 @@ function AdminPage({
   const [appointmentSort, setAppointmentSort] = useState('nearest');
   const [statusUpdatingId, setStatusUpdatingId] = useState('');
   const [bookingActionError, setBookingActionError] = useState('');
+  const [appointmentChangeRequests, setAppointmentChangeRequests] = useState([]);
+  const [requestUpdatingId, setRequestUpdatingId] = useState('');
   const [referencePreviewUrl, setReferencePreviewUrl] = useState('');
   const [unseenCount, setUnseenCount] = useState(0);
   const [notificationBooking, setNotificationBooking] = useState(null);
@@ -308,9 +304,13 @@ function AdminPage({
   const hasLoadedBookingsRef = useRef(false);
   const soundEnabledRef = useRef(soundEnabled);
   const scheduleSignatureRef = useRef(null);
+  const previousRequestIdsRef = useRef(new Set());
+  const hasLoadedRequestsRef = useRef(false);
   const adminBookings = bookings;
 
   const visibleBookings = adminBookings;
+  const pendingAppointmentRequests = appointmentChangeRequests.filter((request) => request.status === 'Pending');
+  const totalAdminAlerts = unseenCount + pendingAppointmentRequests.filter((request) => request.seenByAdmin === false).length;
 
   /* ---------------- portfolio form state (existing logic) ---------------- */
   const [title, setTitle] = useState('');
@@ -325,6 +325,8 @@ function AdminPage({
   const [editId, setEditId] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState('');
+  const portfolioFileInputRef = useRef(null);
 
   /* ---------------- user management state ---------------- */
   const [localUsers, setLocalUsers] = useState(usersProp || []);
@@ -344,11 +346,13 @@ function AdminPage({
   const [loyaltySaveStatus, setLoyaltySaveStatus] = useState('');
   const [claimingRewardUserId, setClaimingRewardUserId] = useState('');
   const [rewardActionStatus, setRewardActionStatus] = useState('');
-  const [businessSettings, setBusinessSettings] = useState(DEFAULT_BUSINESS_SETTINGS);
-  const [settingsDraft, setSettingsDraft] = useState(DEFAULT_BUSINESS_SETTINGS);
+  const [businessSettings, setBusinessSettings] = useState(() => normalizeBusinessSettings(businessSettingsProp));
+  const [settingsDraft, setSettingsDraft] = useState(() => normalizeBusinessSettings(businessSettingsProp));
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState('');
+  const [blackoutDraft, setBlackoutDraft] = useState({ date: '', reason: '' });
   const rewardClaimInFlightRef = useRef(false);
+  const salonTimeZone = businessSettings.timezone || DEFAULT_BUSINESS_SETTINGS.timezone;
 
   useEffect(() => {
     if (usersProp) {
@@ -367,15 +371,30 @@ function AdminPage({
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => listenToAppointmentChangeRequests(
+    (requests) => {
+      setAppointmentChangeRequests(requests);
+      if (hasLoadedRequestsRef.current) {
+        const newRequest = requests.find((request) => request.status === 'Pending' && request.seenByAdmin === false && !previousRequestIdsRef.current.has(`${request.id}:${request.createdAt}`));
+        if (newRequest) {
+          setNotificationBooking({ ...newRequest, isChangeRequest: true });
+          setNotificationVisible(true);
+        }
+      }
+      previousRequestIdsRef.current = new Set(requests.map((request) => `${request.id}:${request.createdAt}`));
+      hasLoadedRequestsRef.current = true;
+    },
+    (error) => {
+      console.warn('Unable to listen for appointment change requests', error);
+      setBookingActionError('Appointment change requests could not be loaded.');
+    }
+  ), []);
+
   useEffect(() => {
-    if (activeTab !== 'settings') return undefined;
-    const unsubscribe = listenToBusinessSettings((settings) => {
-      const nextSettings = { ...DEFAULT_BUSINESS_SETTINGS, ...(settings || {}) };
-      setBusinessSettings(nextSettings);
-      setSettingsDraft(nextSettings);
-    }, () => setSettingsStatus('Business settings could not be loaded. Check the Firebase rules and retry.'));
-    return () => unsubscribe();
-  }, [activeTab]);
+    const nextSettings = normalizeBusinessSettings(businessSettingsProp);
+    setBusinessSettings(nextSettings);
+    setSettingsDraft(nextSettings);
+  }, [businessSettingsProp]);
 
   useEffect(() => {
     if (usersProp) return undefined;
@@ -558,8 +577,8 @@ function AdminPage({
       return matchesBaseFilter && matchesSearch && matchesFrom && matchesTo;
     });
     return filtered.sort((left, right) => {
-      if (appointmentSort === 'newest') return String(right.createdAt || '').localeCompare(String(left.createdAt || ''));
-      if (appointmentSort === 'oldest') return String(left.createdAt || '').localeCompare(String(right.createdAt || ''));
+      if (appointmentSort === 'newest') return compareBookingsByCreatedAt(left, right, 'desc');
+      if (appointmentSort === 'oldest') return compareBookingsByCreatedAt(left, right, 'asc');
       return compareAppointments(left, right);
     });
   }, [appointmentFromDate, appointmentSearch, appointmentSort, appointmentToDate, bookingStatusFilter, selectedAppointmentDate, todayKey, visibleBookings]);
@@ -597,14 +616,42 @@ function AdminPage({
   /* ---------------- portfolio handlers (existing logic) ---------------- */
   const handleFileChange = (e) => {
     const file = e.target.files?.[0] || null;
+    const validationError = file ? getImageFileValidationError(file, 'portfolio') : '';
+    if (validationError) {
+      setImageFile(null);
+      setPreviewSrc('');
+      setUploadError(validationError);
+      setUploadProgress(0);
+      setIsSaving(false);
+      e.target.value = '';
+      return;
+    }
+    setUploadError('');
+    setUploadProgress(0);
     setImageFile(file);
   };
 
-  const handleSubmit = (e) => {
+  const resetPortfolioForm = () => {
+    setEditId(null);
+    setTitle('');
+    setCategory('Gel Manicure');
+    setStyle('');
+    setDescription('');
+    setShape('');
+    setLength('');
+    setFinish('');
+    setImageFile(null);
+    setPreviewSrc('');
+    setUploadProgress(0);
+    setUploadError('');
+    if (portfolioFileInputRef.current) portfolioFileInputRef.current.value = '';
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const image = imageFile || previewSrc;
     if (!title.trim() || !category.trim() || !image) {
-      alert('Please add a title, category, and photo file.');
+      setUploadError('Please add a title, category, and photo file.');
       return;
     }
 
@@ -622,35 +669,27 @@ function AdminPage({
       imageFile: imageFile || null,
     };
 
-    const perform = async () => {
-      setIsSaving(true);
-      setUploadProgress(0);
-      try {
-        if (editId) {
-          await onUpdateWork(editId, itemPayload, (p) => setUploadProgress(p));
-          setEditId(null);
-        } else {
-          await onAddWork(itemPayload, (p) => setUploadProgress(p));
-        }
-      } catch (err) {
-        console.error('Save failed:', err);
-        alert('Save failed. Check console for details.');
-      } finally {
-        setIsSaving(false);
-        setUploadProgress(0);
-        setTitle('');
-        setCategory('Gel Manicure');
-        setStyle('');
-        setDescription('');
-        setShape('');
-        setLength('');
-        setFinish('');
-        setImageFile(null);
-        setPreviewSrc('');
+    setIsSaving(true);
+    setUploadProgress(0);
+    setUploadError('');
+    try {
+      if (editId) {
+        await onUpdateWork(editId, itemPayload, (p) => setUploadProgress(p));
+      } else {
+        await onAddWork(itemPayload, (p) => setUploadProgress(p));
       }
-    };
-
-    perform();
+      resetPortfolioForm();
+    } catch (err) {
+      console.error('Portfolio save failed:', {
+        code: err?.code || 'unknown',
+        status: err?.status_ || err?.status || null,
+      });
+      setUploadError(getImageUploadErrorMessage(err));
+      setUploadProgress(0);
+      if (portfolioFileInputRef.current) portfolioFileInputRef.current.value = '';
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleEditWork = (work) => {
@@ -708,6 +747,7 @@ function AdminPage({
     if (!notificationBooking) return;
     setActiveTab('bookings');
     setNotificationVisible(false);
+    if (notificationBooking.isChangeRequest) return;
     setSelectedBookingId(notificationBooking.id);
     try {
       await markBookingSeen(notificationBooking.id);
@@ -793,19 +833,20 @@ function AdminPage({
   const handleSaveSettings = async (event) => {
     event.preventDefault();
     if (settingsSaving) return;
+    const nextSettings = normalizeBusinessSettings(settingsDraft);
+    const changedSettings = getBusinessSettingsPatch(businessSettings, nextSettings);
+    if (!Object.keys(changedSettings).length) {
+      setSettingsStatus('No unsaved changes.');
+      return;
+    }
     setSettingsSaving(true);
     setSettingsStatus('Saving business settings...');
     try {
-      const saved = await saveBusinessSettings({
-        ...settingsDraft,
-        bookingInterval: Number(settingsDraft.bookingInterval) || DEFAULT_BUSINESS_SETTINGS.bookingInterval,
-        minimumNoticeHours: Number(settingsDraft.minimumNoticeHours) || 0,
-        maximumAdvanceDays: Number(settingsDraft.maximumAdvanceDays) || DEFAULT_BUSINESS_SETTINGS.maximumAdvanceDays,
-        nailArtPricePerNail: Number(settingsDraft.nailArtPricePerNail) || DEFAULT_BUSINESS_SETTINGS.nailArtPricePerNail,
-      });
-      setBusinessSettings({ ...DEFAULT_BUSINESS_SETTINGS, ...saved });
-      setSettingsDraft({ ...DEFAULT_BUSINESS_SETTINGS, ...saved });
-      setSettingsStatus('Business settings saved.');
+      await saveBusinessSettings(changedSettings);
+      const savedSettings = normalizeBusinessSettings({ ...businessSettings, ...changedSettings });
+      setBusinessSettings(savedSettings);
+      setSettingsDraft(savedSettings);
+      setSettingsStatus('Saved ✓');
     } catch (error) {
       setSettingsStatus(error?.message || 'Business settings could not be saved.');
     } finally {
@@ -813,17 +854,70 @@ function AdminPage({
     }
   };
 
+  const handleAppointmentRequestDecision = async (request, decision) => {
+    if (requestUpdatingId) return;
+    const action = decision === 'Approved' ? 'approve' : 'decline';
+    if (!window.confirm(`${action === 'approve' ? 'Approve' : 'Decline'} this ${request.type} request?`)) return;
+    setRequestUpdatingId(request.id);
+    setBookingActionError('');
+    try {
+      await reviewAppointmentChangeRequest(request.id, decision);
+    } catch (error) {
+      setBookingActionError(error?.message || `The ${request.type} request could not be ${action}d.`);
+    } finally {
+      setRequestUpdatingId('');
+    }
+  };
+
+  const updateSettingsField = (field, value) => {
+    setSettingsDraft((current) => ({ ...current, [field]: value }));
+    setSettingsStatus('');
+  };
+
+  const updateWeeklyHours = (field, day, key, value) => {
+    setSettingsDraft((current) => ({
+      ...current,
+      [field]: {
+        ...current[field],
+        [day]: { ...current[field][day], [key]: value },
+      },
+    }));
+    setSettingsStatus('');
+  };
+
+  const handleAddBlackoutDate = () => {
+    if (!blackoutDraft.date) {
+      setSettingsStatus('Choose a blackout date first.');
+      return;
+    }
+    updateSettingsField('blackoutDates', {
+      ...settingsDraft.blackoutDates,
+      [blackoutDraft.date]: { date: blackoutDraft.date, reason: blackoutDraft.reason.trim() },
+    });
+    setBlackoutDraft({ date: '', reason: '' });
+  };
+
+  const handleRemoveBlackoutDate = (date) => {
+    const nextDates = { ...settingsDraft.blackoutDates };
+    delete nextDates[date];
+    updateSettingsField('blackoutDates', nextDates);
+  };
+
+  const handleNailArtEligibilityChange = (serviceId, enabled) => {
+    if (!enabled && settingsDraft.nailArtEligibleServiceIds.length === 1) {
+      setSettingsStatus('Keep at least one service eligible for Nail Art.');
+      return;
+    }
+    updateSettingsField(
+      'nailArtEligibleServiceIds',
+      enabled
+        ? [...new Set([...settingsDraft.nailArtEligibleServiceIds, serviceId])]
+        : settingsDraft.nailArtEligibleServiceIds.filter((id) => id !== serviceId)
+    );
+  };
+
   const handleCancelEdit = () => {
-    setEditId(null);
-    setTitle('');
-    setCategory('Gel Manicure');
-    setStyle('');
-    setDescription('');
-    setShape('');
-    setLength('');
-    setFinish('');
-    setImageFile(null);
-    setPreviewSrc('');
+    resetPortfolioForm();
   };
 
   /* ---------------- user management handlers ---------------- */
@@ -1146,12 +1240,12 @@ function AdminPage({
           <div className="adm-topbar-actions">
             <button
               type="button"
-              className={cx('adm-avatar', unseenCount > 0 && 'adm-avatar--alert')}
-              title={unseenCount > 0 ? `${unseenCount} new booking${unseenCount === 1 ? '' : 's'}` : 'Admin'}
+              className={cx('adm-avatar', totalAdminAlerts > 0 && 'adm-avatar--alert')}
+              title={totalAdminAlerts > 0 ? `${totalAdminAlerts} appointment alert${totalAdminAlerts === 1 ? '' : 's'}` : 'Admin'}
               onClick={() => setActiveTab('bookings')}
             >
               AD
-              {unseenCount > 0 && <span className="adm-avatar-badge">{unseenCount}</span>}
+              {totalAdminAlerts > 0 && <span className="adm-avatar-badge">{totalAdminAlerts}</span>}
             </button>
           </div>
         </header>
@@ -1165,19 +1259,14 @@ function AdminPage({
           {notificationVisible && notificationBooking ? (
             <div className="adm-booking-notification" role="status" aria-live="polite">
               <div>
-                <strong>New booking received</strong>
-                <p>
-                {notificationBooking.customerName || notificationBooking.name || 'A guest'} booked {getBookingServiceLabel(notificationBooking)}
-                {getBookingNailQuantity(notificationBooking) ? ` (${getBookingNailQuantity(notificationBooking)} nails)` : ''}
-                {getNailArtSummary(notificationBooking) ? ` with ${getNailArtSummary(notificationBooking)}` : ''}
-                for {notificationBooking.date} at {notificationBooking.time}.
-              </p>
+                <strong>{notificationBooking.isChangeRequest ? `New ${notificationBooking.type} request` : 'New booking received'}</strong>
+                <p>{notificationBooking.isChangeRequest ? 'A customer submitted an appointment change request for review.' : <>{notificationBooking.customerName || notificationBooking.name || 'A guest'} booked {getBookingServiceLabel(notificationBooking)}{getBookingNailQuantity(notificationBooking) ? ` (${getBookingNailQuantity(notificationBooking)} nails)` : ''}{getNailArtSummary(notificationBooking) ? ` with ${getNailArtSummary(notificationBooking)}` : ''} for {notificationBooking.date} at {notificationBooking.time}.</>}</p>
               </div>
               <div className="adm-booking-notification-actions">
                 {!soundEnabled ? (
                   <button type="button" className="adm-notification-btn" onClick={handleEnableSound}>Enable sound</button>
                 ) : null}
-                <button type="button" className="adm-notification-btn adm-notification-btn--primary" onClick={handleNotificationClick}>View booking</button>
+                <button type="button" className="adm-notification-btn adm-notification-btn--primary" onClick={handleNotificationClick}>{notificationBooking.isChangeRequest ? 'Review request' : 'View booking'}</button>
               </div>
             </div>
           ) : null}
@@ -1331,7 +1420,19 @@ function AdminPage({
                   </label>
                   <label className="adm-field">
                     <span>Choose file</span>
-                    <input type="file" accept="image/*" onChange={handleFileChange} />
+                    <input
+                      ref={portfolioFileInputRef}
+                      type="file"
+                      accept="image/jpeg,image/jpg,image/png,image/webp"
+                      onChange={handleFileChange}
+                      disabled={isSaving}
+                    />
+                    <small className="adm-upload-help">JPG, PNG or WebP • Max 8 MB</small>
+                    {imageFile && (
+                      <small className="adm-selected-file">
+                        {imageFile.name} • {formatFileSize(imageFile.size)}
+                      </small>
+                    )}
                   </label>
                   {previewSrc && (
                     <div className="adm-image-preview">
@@ -1355,6 +1456,7 @@ function AdminPage({
                       <div className="adm-upload-label">Uploading: {uploadProgress}%</div>
                     </div>
                   )}
+                  {uploadError && <p className="adm-upload-error" role="alert">{uploadError}</p>}
                 </form>
               </section>
 
@@ -1434,6 +1536,35 @@ function AdminPage({
               {bookingActionError ? (
                 <div className="adm-alert adm-alert--warning" role="alert">{bookingActionError}</div>
               ) : null}
+              {pendingAppointmentRequests.length > 0 ? (
+                <section className="adm-panel adm-request-panel" aria-labelledby="appointment-request-title">
+                  <div className="adm-panel-head">
+                    <h2 id="appointment-request-title">Appointment change requests</h2>
+                    <p className="adm-panel-subtitle">The original confirmed time stays blocked until you approve a request.</p>
+                  </div>
+                  <div className="adm-request-list">
+                    {pendingAppointmentRequests.map((request) => {
+                      const booking = bookings.find((item) => item.id === request.bookingId);
+                      return (
+                        <article className="adm-request-card" key={request.id}>
+                          <div className="adm-request-copy">
+                            <span className="adm-settings-kicker">{request.type === 'cancellation' ? 'Cancellation request' : 'Reschedule request'}</span>
+                            <strong>{booking?.customerName || booking?.name || 'Customer'} · {getBookingServiceLabel(booking)}</strong>
+                            <p>Current: {formatDate(booking?.date)} · {formatTime(booking?.time)}</p>
+                            {request.type === 'reschedule' ? <p>Requested: <b>{formatDate(request.requestedDate)} · {formatTime(request.requestedTime)}</b></p> : null}
+                            {request.reason ? <p>Reason: {request.reason}</p> : null}
+                            <small>Sent {formatBookingCreatedAt(request.createdAt, salonTimeZone) || 'recently'}</small>
+                          </div>
+                          <div className="adm-request-actions">
+                            <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={requestUpdatingId === request.id} onClick={() => handleAppointmentRequestDecision(request, 'Approved')}>{requestUpdatingId === request.id ? 'Reviewing...' : 'Approve'}</button>
+                            <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={requestUpdatingId === request.id} onClick={() => handleAppointmentRequestDecision(request, 'Declined')}>Decline</button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
               {appointmentConflicts.length > 0 ? (
                 <div className="adm-alert adm-alert--warning" role="alert">
                   <strong>Scheduling conflict:</strong>{' '}
@@ -1482,6 +1613,7 @@ function AdminPage({
                       <tbody>
                         {filteredAppointments.map((booking) => {
                           const normalizedStatus = normalizeBookingStatus(booking.status);
+                          const bookedOn = formatBookingCreatedAt(booking.createdAt, salonTimeZone);
                           const hasConflict = appointmentConflicts.some((conflict) => (
                             conflict.date === booking.date && conflict.time === booking.time
                           ));
@@ -1499,6 +1631,9 @@ function AdminPage({
                             <td>
                               <div>{formatDate(booking.date)}</div>
                               <small className="adm-booking-customization">{formatTime(booking.time)}</small>
+                              <small className="adm-booking-created-at">
+                                {bookedOn ? `Booked ${bookedOn}` : 'Booked date unavailable'}
+                              </small>
                               {hasConflict ? <small className="adm-conflict-label">Scheduling conflict</small> : null}
                             </td>
                             <td><strong className="adm-booking-total">{formatPeso(getBookingTotal(booking))}</strong></td>
@@ -1537,41 +1672,163 @@ function AdminPage({
                     </table>
                   </div>
                 )}
+                {!loading && filteredAppointments.length > 0 && (
+                  <div className="adm-appointment-cards">
+                    {filteredAppointments.map((booking) => {
+                      const normalizedStatus = normalizeBookingStatus(booking.status);
+                      const bookedOn = formatBookingCreatedAt(booking.createdAt, salonTimeZone);
+                      const hasConflict = appointmentConflicts.some((conflict) => (
+                        conflict.date === booking.date && conflict.time === booking.time
+                      ));
+                      return (
+                        <article className="adm-appointment-card" key={booking.id}>
+                          <header className="adm-appointment-card-head">
+                            <div>
+                              <strong>{getBookingCustomerName(booking)}</strong>
+                              <small>{getBookingServiceLabel(booking)}</small>
+                            </div>
+                          </header>
+                          <div className="adm-appointment-card-grid">
+                            <div className="adm-appointment-card-field adm-appointment-card-field--wide">
+                              <span>Appointment</span>
+                              <strong>{formatDate(booking.date)} · {formatTime(booking.time)}</strong>
+                            </div>
+                            <div className="adm-appointment-card-field adm-appointment-card-field--wide">
+                              <span>Booked</span>
+                              <strong>{bookedOn || 'Date unavailable'}</strong>
+                            </div>
+                            <div className="adm-appointment-card-field">
+                              <span>Status</span>
+                              <strong>{normalizedStatus}</strong>
+                            </div>
+                            <div className="adm-appointment-card-field">
+                              <span>Total</span>
+                              <strong>{formatPeso(getBookingTotal(booking))}</strong>
+                            </div>
+                          </div>
+                          {getNailArtSummary(booking) ? <small className="adm-booking-customization">{getNailArtSummary(booking)}</small> : null}
+                          {hasConflict ? <small className="adm-conflict-label">Scheduling conflict</small> : null}
+                          <footer className="adm-appointment-card-actions">
+                            {normalizedStatus === 'Pending Confirmation' ? (
+                              <>
+                                <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => handleBookingAction(booking.id, 'Confirmed')}>Confirm</button>
+                                <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Decline this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Decline</button>
+                              </>
+                            ) : normalizedStatus === 'Confirmed' ? (
+                              <>
+                                <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => handleBookingAction(booking.id, 'Completed')}>Complete</button>
+                                <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Cancel this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Cancel</button>
+                              </>
+                            ) : null}
+                            <button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => handleOpenBooking(booking)}>View details</button>
+                          </footer>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
               </section>
             </>
           )}
 
           {activeTab === 'settings' && (
             <form className="adm-settings-layout" onSubmit={handleSaveSettings}>
+              <section className="adm-panel adm-settings-intro">
+                <div className="adm-panel-head">
+                  <div><span className="adm-settings-kicker">Business control center</span><h2>Settings</h2></div>
+                  <p className="adm-panel-subtitle">Changes saved here update the customer website and booking rules from one shared Firebase record.</p>
+                </div>
+              </section>
+
               <section className="adm-panel">
-                <div className="adm-panel-head"><h2>Business information</h2><p className="adm-panel-subtitle">One record powers the details used across the customer experience.</p></div>
+                <div className="adm-panel-head"><h2>1. Business information</h2><p className="adm-panel-subtitle">Public salon details used on the website and in customer communication.</p></div>
                 <div className="adm-settings-grid">
                   {[
                     ['businessName', 'Business name'], ['phone', 'Phone number'], ['email', 'Email'], ['address', 'Address'],
-                    ['businessHours', 'Business hours'], ['facebookUrl', 'Facebook URL'], ['instagramUrl', 'Instagram URL'],
-                  ].map(([field, label]) => <label className="adm-field" key={field}><span>{label}</span><input value={settingsDraft[field] || ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field]: event.target.value }))} /></label>)}
+                    ['facebookUrl', 'Facebook URL'], ['instagramUrl', 'Instagram URL'], ['timezone', 'Business timezone'],
+                  ].map(([field, label]) => <label className="adm-field" key={field}><span>{label}</span><input value={settingsDraft[field] || ''} onChange={(event) => updateSettingsField(field, event.target.value)} /></label>)}
+                  <label className="adm-field adm-settings-wide"><span>Tagline or short description</span><textarea rows="2" maxLength="240" value={settingsDraft.tagline} onChange={(event) => updateSettingsField('tagline', event.target.value)} /></label>
                 </div>
               </section>
+
               <section className="adm-panel">
-                <div className="adm-panel-head"><h2>Booking settings</h2><p className="adm-panel-subtitle">These values are stored centrally for the booking workflow to consume.</p></div>
-                <div className="adm-settings-grid">
-                  <label className="adm-field"><span>Booking interval (minutes)</span><input type="number" min="5" step="5" value={settingsDraft.bookingInterval} onChange={(event) => setSettingsDraft((current) => ({ ...current, bookingInterval: event.target.value }))} /></label>
-                  <label className="adm-field"><span>Minimum booking notice (hours)</span><input type="number" min="0" step="1" value={settingsDraft.minimumNoticeHours} onChange={(event) => setSettingsDraft((current) => ({ ...current, minimumNoticeHours: event.target.value }))} /></label>
-                  <label className="adm-field"><span>Maximum advance booking (days)</span><input type="number" min="1" step="1" value={settingsDraft.maximumAdvanceDays} onChange={(event) => setSettingsDraft((current) => ({ ...current, maximumAdvanceDays: event.target.value }))} /></label>
-                  <label className="adm-field"><span>Business timezone</span><input value={settingsDraft.timezone} onChange={(event) => setSettingsDraft((current) => ({ ...current, timezone: event.target.value }))} /></label>
-                  <label className="adm-field adm-settings-wide"><span>Cancellation policy</span><textarea rows="3" value={settingsDraft.cancellationPolicy} onChange={(event) => setSettingsDraft((current) => ({ ...current, cancellationPolicy: event.target.value }))} /></label>
-                  <label className="adm-field adm-settings-wide"><span>Late arrival policy</span><textarea rows="3" value={settingsDraft.lateArrivalPolicy} onChange={(event) => setSettingsDraft((current) => ({ ...current, lateArrivalPolicy: event.target.value }))} /></label>
+                <div className="adm-panel-head"><h2>2. Business hours</h2><p className="adm-panel-subtitle">These hours appear on the customer website and limit appointment availability.</p></div>
+                <div className="adm-hours-table">
+                  {BUSINESS_WEEKDAYS.map((day) => {
+                    const hours = settingsDraft.businessHours[day.key];
+                    return <div className="adm-hours-row" key={day.key}><strong>{day.label}</strong><label className="adm-toggle-field"><input type="checkbox" checked={hours.open} onChange={(event) => updateWeeklyHours('businessHours', day.key, 'open', event.target.checked)} /><span>{hours.open ? 'Open' : 'Closed'}</span></label><label className="adm-field"><span>Opens</span><input type="time" disabled={!hours.open} value={hours.openTime} onChange={(event) => updateWeeklyHours('businessHours', day.key, 'openTime', event.target.value)} /></label><label className="adm-field"><span>Closes</span><input type="time" disabled={!hours.open} value={hours.closeTime} onChange={(event) => updateWeeklyHours('businessHours', day.key, 'closeTime', event.target.value)} /></label></div>;
+                  })}
                 </div>
               </section>
+
               <section className="adm-panel">
-                <div className="adm-panel-head"><h2>Nail art and reminders</h2><p className="adm-panel-subtitle">Keep the add-on price and reminder preferences visible to the team.</p></div>
-                <div className="adm-settings-grid">
-                  <label className="adm-field"><span>Price per nail (₱)</span><input type="number" min="1" step="1" value={settingsDraft.nailArtPricePerNail} onChange={(event) => setSettingsDraft((current) => ({ ...current, nailArtPricePerNail: event.target.value }))} /></label>
-                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.reminder24hEnabled} onChange={(event) => setSettingsDraft((current) => ({ ...current, reminder24hEnabled: event.target.checked }))} /><span>24-hour reminder</span></label>
-                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.reminder12hEnabled} onChange={(event) => setSettingsDraft((current) => ({ ...current, reminder12hEnabled: event.target.checked }))} /><span>12-hour reminder</span></label>
+                <div className="adm-panel-head"><h2>3. Blackout dates</h2><p className="adm-panel-subtitle">Block holidays, personal leave, or other dates when appointments cannot be booked.</p></div>
+                <div className="adm-blackout-editor">
+                  <label className="adm-field"><span>Date</span><input type="date" value={blackoutDraft.date} onChange={(event) => setBlackoutDraft((current) => ({ ...current, date: event.target.value }))} /></label>
+                  <label className="adm-field"><span>Reason (optional)</span><input maxLength="120" placeholder="Holiday or salon closure" value={blackoutDraft.reason} onChange={(event) => setBlackoutDraft((current) => ({ ...current, reason: event.target.value }))} /></label>
+                  <button className="adm-btn adm-btn--ghost" type="button" onClick={handleAddBlackoutDate}>Add date</button>
                 </div>
-                <div className="adm-form-actions"><button className="adm-btn adm-btn--primary" type="submit" disabled={settingsSaving}>{settingsSaving ? 'Saving...' : 'Save settings'}</button>{settingsStatus ? <span className="adm-inline-status" role="status">{settingsStatus}</span> : null}</div>
+                <div className="adm-blackout-list">
+                  {Object.values(settingsDraft.blackoutDates).sort((left, right) => left.date.localeCompare(right.date)).map((entry) => <div className="adm-blackout-item" key={entry.date}><div><strong>{formatDate(entry.date)}</strong><span>{entry.reason || 'Closed'}</span></div><button className="adm-btn adm-btn--danger adm-btn--sm" type="button" onClick={() => handleRemoveBlackoutDate(entry.date)}>Remove</button></div>)}
+                  {!Object.keys(settingsDraft.blackoutDates).length ? <p className="adm-empty-copy">No blackout dates configured.</p> : null}
+                </div>
               </section>
+
+              <section className="adm-panel">
+                <div className="adm-panel-head"><h2>4. Booking settings</h2><p className="adm-panel-subtitle">Control how far ahead customers book and how much space each appointment needs.</p></div>
+                <div className="adm-settings-grid">
+                  <label className="adm-field"><span>Booking interval (minutes)</span><input type="number" min="5" max="240" step="5" value={settingsDraft.bookingInterval} onChange={(event) => updateSettingsField('bookingInterval', event.target.value)} /></label>
+                  <label className="adm-field"><span>Minimum notice (hours)</span><input type="number" min="0" max="720" step="1" value={settingsDraft.minimumNoticeHours} onChange={(event) => updateSettingsField('minimumNoticeHours', event.target.value)} /></label>
+                  <label className="adm-field"><span>Maximum advance booking (days)</span><input type="number" min="1" max="730" step="1" value={settingsDraft.maximumAdvanceDays} onChange={(event) => updateSettingsField('maximumAdvanceDays', event.target.value)} /></label>
+                  <label className="adm-field"><span>Buffer between appointments (minutes)</span><input type="number" min="0" max="240" step="5" value={settingsDraft.appointmentBufferMinutes} onChange={(event) => updateSettingsField('appointmentBufferMinutes', event.target.value)} /></label>
+                  <label className="adm-field"><span>Maximum appointments per day</span><input type="number" min="1" max="100" step="1" value={settingsDraft.maximumAppointmentsPerDay} onChange={(event) => updateSettingsField('maximumAppointmentsPerDay', event.target.value)} /></label>
+                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.allowSameDayBooking} onChange={(event) => updateSettingsField('allowSameDayBooking', event.target.checked)} /><span>Allow same-day booking</span></label>
+                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.allowCustomerCancellation} onChange={(event) => updateSettingsField('allowCustomerCancellation', event.target.checked)} /><span>Allow customer cancellation requests online</span></label>
+                  <label className="adm-field"><span>Cancellation deadline (hours)</span><input type="number" min="0" max="720" value={settingsDraft.cancellationDeadlineHours} disabled={!settingsDraft.allowCustomerCancellation} onChange={(event) => updateSettingsField('cancellationDeadlineHours', event.target.value)} /></label>
+                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.allowCustomerReschedule} onChange={(event) => updateSettingsField('allowCustomerReschedule', event.target.checked)} /><span>Allow customer reschedule requests online</span></label>
+                  <label className="adm-field"><span>Reschedule deadline (hours)</span><input type="number" min="0" max="720" value={settingsDraft.rescheduleDeadlineHours} disabled={!settingsDraft.allowCustomerReschedule} onChange={(event) => updateSettingsField('rescheduleDeadlineHours', event.target.value)} /></label>
+                </div>
+              </section>
+
+              <section className="adm-panel">
+                <div className="adm-panel-head"><h2>5. Online booking hours</h2><p className="adm-panel-subtitle">Use narrower hours here when online appointments should differ from business hours.</p></div>
+                <div className="adm-hours-table">
+                  {BUSINESS_WEEKDAYS.map((day) => {
+                    const hours = settingsDraft.onlineBookingHours[day.key];
+                    return <div className="adm-hours-row" key={day.key}><strong>{day.label}</strong><label className="adm-toggle-field"><input type="checkbox" checked={hours.open} onChange={(event) => updateWeeklyHours('onlineBookingHours', day.key, 'open', event.target.checked)} /><span>{hours.open ? 'Available' : 'Closed'}</span></label><label className="adm-field"><span>Starts</span><input type="time" disabled={!hours.open} value={hours.openTime} onChange={(event) => updateWeeklyHours('onlineBookingHours', day.key, 'openTime', event.target.value)} /></label><label className="adm-field"><span>Ends</span><input type="time" disabled={!hours.open} value={hours.closeTime} onChange={(event) => updateWeeklyHours('onlineBookingHours', day.key, 'closeTime', event.target.value)} /></label></div>;
+                  })}
+                </div>
+              </section>
+
+              <section className="adm-panel">
+                <div className="adm-panel-head"><h2>6. Nail service settings</h2><p className="adm-panel-subtitle">Configure Nail Art pricing and booking reference uploads without changing code.</p></div>
+                <div className="adm-settings-grid">
+                  <label className="adm-field"><span>Nail Art price per nail (₱)</span><input type="number" min="0" max="10000" step="1" value={settingsDraft.nailArtPricePerNail} onChange={(event) => updateSettingsField('nailArtPricePerNail', event.target.value)} /></label>
+                  <label className="adm-field"><span>Maximum Nail Art quantity</span><input type="number" min="1" max="10" step="1" value={settingsDraft.maximumNailArtQuantity} onChange={(event) => updateSettingsField('maximumNailArtQuantity', event.target.value)} /></label>
+                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.allowReferencePhoto} onChange={(event) => updateSettingsField('allowReferencePhoto', event.target.checked)} /><span>Allow booking reference photos</span></label>
+                  <div className="adm-settings-wide adm-settings-info"><strong>Upload limits</strong><span>Booking reference photos: 5 MB · Portfolio images: 8 MB</span><small>Limits are enforced by the app and Firebase Storage rules.</small></div>
+                  <fieldset className="adm-settings-wide adm-checklist"><legend>Nail Art eligible services</legend>{SERVICES.filter((service) => service.nailArtEligible).map((service) => <label className="adm-toggle-field" key={service.id}><input type="checkbox" checked={settingsDraft.nailArtEligibleServiceIds.includes(service.id)} onChange={(event) => handleNailArtEligibilityChange(service.id, event.target.checked)} /><span>{service.title}</span></label>)}</fieldset>
+                </div>
+              </section>
+
+              <section className="adm-panel">
+                <div className="adm-panel-head"><h2>7. Appointment policies</h2><p className="adm-panel-subtitle">Short public policies shown to customers while booking and on their profile.</p></div>
+                <div className="adm-settings-grid">
+                  {[['cancellationPolicy', 'Cancellation policy'], ['lateArrivalPolicy', 'Late arrival policy'], ['noShowPolicy', 'No-show policy'], ['appointmentPreparationNote', 'Appointment preparation note']].map(([field, label]) => <label className="adm-field adm-settings-wide" key={field}><span>{label}</span><textarea rows="3" maxLength="2000" value={settingsDraft[field]} onChange={(event) => updateSettingsField(field, event.target.value)} /></label>)}
+                </div>
+              </section>
+
+              <section className="adm-panel">
+                <div className="adm-panel-head"><h2>8. Notifications and reminders</h2><p className="adm-panel-subtitle">Choose which automated customer updates the booking workflow may send.</p></div>
+                <div className="adm-settings-toggle-grid">
+                  {[['reminder24hEnabled', '24-hour appointment reminders'], ['reminder12hEnabled', '12-hour appointment reminders'], ['inAppReminderEnabled', 'In-app reminder notifications'], ['bookingConfirmationNotificationEnabled', 'Booking confirmation notifications'], ['cancellationNotificationEnabled', 'Cancellation notifications'], ['rescheduleNotificationEnabled', 'Reschedule notifications']].map(([field, label]) => <label className="adm-toggle-field" key={field}><input type="checkbox" checked={settingsDraft[field]} onChange={(event) => updateSettingsField(field, event.target.checked)} /><span>{label}</span></label>)}
+                </div>
+              </section>
+
+              <div className="adm-settings-savebar">
+                <div><strong>Publish settings</strong><span>Only changed fields are written to Firebase.</span></div>
+                <div className="adm-form-actions"><button className="adm-btn adm-btn--primary" type="submit" disabled={settingsSaving}>{settingsSaving ? 'Saving...' : 'Save changes'}</button>{settingsStatus ? <span className="adm-inline-status" role="status">{settingsStatus}</span> : null}</div>
+              </div>
             </form>
           )}
 
@@ -1991,12 +2248,22 @@ function AdminPage({
                 </section>
 
                 <section className="adm-detail-card">
+                  <h4>Booking information</h4>
+                  <div className="adm-detail-row">
+                    <span>Booked On</span>
+                    <strong>{formatBookingCreatedAt(selectedBooking.createdAt, salonTimeZone) || 'Date unavailable'}</strong>
+                  </div>
+                  <div className="adm-detail-row"><span>Appointment Date</span><strong>{formatDate(selectedBooking.date)}</strong></div>
+                  <div className="adm-detail-row"><span>Appointment Time</span><strong>{formatTime(selectedBooking.time)}</strong></div>
+                </section>
+
+                <section className="adm-detail-card">
                   <h4>Customization</h4>
                   <div className="adm-detail-row"><span>Nail Art</span><strong>{selectedBookingNailArt.enabled ? 'Yes' : 'None'}</strong></div>
                   {selectedBookingNailArt.enabled ? (
                     <>
                       <div className="adm-detail-row"><span>Quantity</span><strong>{selectedBookingNailArt.quantity} nails</strong></div>
-                      <div className="adm-detail-row"><span>Price per nail</span><strong>{formatPeso(NAIL_ART_ADD_ON.pricePerNail)}</strong></div>
+                      <div className="adm-detail-row"><span>Price per nail</span><strong>{formatPeso(selectedBookingNailArt.pricePerNail)}</strong></div>
                       <div className="adm-detail-row"><span>Add-on total</span><strong>{formatPeso(selectedBookingNailArt.total)}</strong></div>
                     </>
                   ) : null}

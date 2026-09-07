@@ -24,3 +24,16 @@ test('calendar disables past, closed, and fully booked dates', () => {
   assert.equal(cells.find((cell) => cell.key === '2026-09-06').isClosed, true);
   assert.equal(cells.find((cell) => cell.key === '2026-09-07').disabled, false);
 });
+
+test('calendar applies same-day, maximum advance, and blackout settings', () => {
+  const cells = getCalendarCells(new Date(2026, 8, 1), {
+    todayKey: '2026-09-03',
+    allowSameDayBooking: false,
+    maximumDateKey: '2026-09-20',
+    blackoutDates: new Set(['2026-09-10']),
+  }).filter(Boolean);
+
+  assert.equal(cells.find((cell) => cell.key === '2026-09-03').isSameDayUnavailable, true);
+  assert.equal(cells.find((cell) => cell.key === '2026-09-10').isBlackout, true);
+  assert.equal(cells.find((cell) => cell.key === '2026-09-21').isBeyondAdvanceWindow, true);
+});

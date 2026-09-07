@@ -17,8 +17,15 @@ import {
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
 } from 'firebase/auth';
 import { getDatabase, ref, set, get, onValue, update, push, remove, runTransaction, query as rtdbQuery, orderByChild, orderByKey, equalTo, startAt, endAt, limitToLast } from 'firebase/database';
+import {
+  getDownloadURL,
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  uploadBytesResumable,
+} from 'firebase/storage';
 import { mergeProfileData } from './profilePersistence';
-import { getAdminAuthorizationFromRecord } from './authFlow';
+import { getAdminAuthorizationFromRecord, isFirebasePermissionDenied } from './authFlow';
 import {
   PASSWORD_RESET_EMAIL_MESSAGE,
   getPasswordResetEmailErrorMessage,
@@ -32,6 +39,10 @@ import {
   normalizeLoyaltyProgram,
 } from './loyaltyProgram';
 import {
+  ALLOWED_IMAGE_TYPES,
+  getImageFileValidationError,
+} from './imageUploadConfig';
+import {
   PENDING_SLOT_HOLD_MS,
   ScheduleConflictError,
   createScheduleEntry,
@@ -40,6 +51,14 @@ import {
   hasScheduleConflict,
   isConfirmedScheduleStatus,
 } from './scheduling';
+import {
+  getBookableTimeSlots,
+  getBookingDateRestriction,
+  hasReachedDailyAppointmentLimit,
+  normalizeBusinessSettings,
+  canManageAppointmentOnline,
+  validateBusinessSettingsPatch,
+} from './businessSettings';
 
 export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -56,12 +75,15 @@ export const firebaseConfig = {
 let app = null;
 let rtdb = null;
 let auth = null;
+let storage = null;
 let googleProvider = null;
 let passwordResetActionCodeSettings;
 const customerRecordSyncPromises = new Map();
 const authorizationPromises = new Map();
 const authorizationCache = new Map();
 const AUTHORIZATION_CACHE_MS = 5000;
+const PORTFOLIO_UPLOAD_FOLDERS = new Set(['portfolio', 'portfolio-thumbnails']);
+const CUSTOMER_UPLOAD_FOLDERS = new Set(['booking-references']);
 
 const NAME_REGEX = /^[A-Za-zÀ-ÖØ-öø-ÿ' -]{2,60}$/;
 
@@ -214,6 +236,7 @@ export function initFirebase() {
   app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
   rtdb = getDatabase(app, firebaseConfig.databaseURL);
   auth = getAuth(app);
+  storage = getStorage(app);
   googleProvider = new GoogleAuthProvider();
   passwordResetActionCodeSettings = getPasswordResetActionCodeSettings(firebaseConfig.passwordResetContinueUrl);
   googleProvider.setCustomParameters({ prompt: 'select_account' });
@@ -249,11 +272,6 @@ async function applyPersistence(remember) {
   await setPersistence(auth, persistence);
 }
 
-function isPermissionDenied(error) {
-  const code = String(error?.code || '').toLowerCase();
-  return code.includes('permission_denied') || code.includes('permission-denied');
-}
-
 async function readUserAuthorization(uid, email) {
   const customerAuthorization = { role: 'customer', isAdmin: false, status: 'active' };
   if (!rtdb || !uid) return customerAuthorization;
@@ -271,11 +289,10 @@ async function readUserAuthorization(uid, email) {
       return adminAuthorization;
     }
   } catch (error) {
-    // The current rules deny reads of a missing admins/{uid} node. That denial
-    // means this authenticated UID has no Admin authorization and is expected
-    // for normal customers. Any other failure is treated as an authorization
-    // error rather than silently granting customer or Admin access.
-    if (!isPermissionDenied(error)) throw error;
+    // Older deployed rules reject an authenticated user's read when their own
+    // Admin node does not exist. That is an expected non-Admin result, including
+    // when the SDK supplies only the message "Permission denied" and no code.
+    if (!isFirebasePermissionDenied(error)) throw error;
   }
 
   const customerSnapshot = await get(ref(rtdb, `users/${uid}`));
@@ -333,9 +350,7 @@ export async function signInWithGoogle(remember = true) {
     }
 
     if (!authorization.isAdmin) {
-      await createOrUpdateCustomerRecord(result.user).catch((error) => {
-        console.warn('Failed to sync customer record after Google sign-in', error);
-      });
+      await createOrUpdateCustomerRecord(result.user);
     }
     return result.user;
   } catch (error) {
@@ -358,9 +373,7 @@ export async function signInWithEmail(email, password, remember = true) {
   }
 
   if (!authorization.isAdmin) {
-    await createOrUpdateCustomerRecord(result.user).catch((error) => {
-      console.warn('Failed to sync customer record after email sign-in', error);
-    });
+    await createOrUpdateCustomerRecord(result.user);
   }
   return result.user;
 }
@@ -378,9 +391,7 @@ export async function createAccountWithEmail(name, email, password, remember = t
 
   const currentUser = auth.currentUser || result.user;
   if (currentUser) {
-    await createOrUpdateCustomerRecord(currentUser).catch((error) => {
-      console.warn('Failed to sync customer record after account creation', error);
-    });
+    await createOrUpdateCustomerRecord(currentUser);
   }
   return result.user;
 }
@@ -470,6 +481,22 @@ export async function saveBooking(booking) {
     throw new Error('Please sign in before submitting a booking.');
   }
 
+  const settingsSnapshot = await get(ref(rtdb, 'settings/business'));
+  const businessSettings = normalizeBusinessSettings(settingsSnapshot.exists() ? settingsSnapshot.val() : {});
+  const dateRestriction = getBookingDateRestriction(sanitizedBooking.date, businessSettings, new Date());
+  if (dateRestriction) {
+    throw new ScheduleConflictError(`This appointment date is unavailable: ${dateRestriction}. Please choose another day.`);
+  }
+  const allowedSlots = getBookableTimeSlots(
+    sanitizedBooking.date,
+    appointmentInterval?.durationMinutes,
+    businessSettings,
+    new Date()
+  );
+  if (!allowedSlots.includes(sanitizedBooking.time)) {
+    throw new ScheduleConflictError('This appointment time is outside the current online booking availability. Please choose another time.');
+  }
+
   const bookingsRef = ref(rtdb, 'bookings');
   const newBookingRef = push(bookingsRef);
   const bookingId = newBookingRef.key;
@@ -488,7 +515,11 @@ export async function saveBooking(booking) {
   try {
     scheduleLock = await acquireScheduleMutex(sanitizedBooking.date, sanitizedBooking.uid);
     const scheduleEntries = await readScheduleDate(sanitizedBooking.date);
-    if (hasScheduleConflict(bookingWithId, scheduleEntries, { includePendingHolds: true })) {
+    if (hasReachedDailyAppointmentLimit(scheduleEntries, sanitizedBooking.date, businessSettings)
+      || hasScheduleConflict(bookingWithId, scheduleEntries, {
+        includePendingHolds: true,
+        bufferMinutes: businessSettings.appointmentBufferMinutes,
+      })) {
       throw new ScheduleConflictError();
     }
 
@@ -599,6 +630,8 @@ export async function updateBookingStatus(bookingId, status) {
     throw new Error('The selected booking no longer exists.');
   }
   const booking = { id: bookingId, ...(bookingSnapshot.val() || {}) };
+  const settingsSnapshot = await get(ref(rtdb, 'settings/business'));
+  const businessSettings = normalizeBusinessSettings(settingsSnapshot.exists() ? settingsSnapshot.val() : {});
   if (isConfirmedScheduleStatus(status) && !isConfirmedScheduleStatus(booking.status)) {
     updateData.confirmedAt = updatedAt;
   }
@@ -613,7 +646,11 @@ export async function updateBookingStatus(bookingId, status) {
           readScheduleDate(booking.date),
           readBookingsForDate(booking.date),
         ]);
-        const conflictOptions = { includePendingHolds: false, excludeBookingId: bookingId };
+        const conflictOptions = {
+          includePendingHolds: false,
+          excludeBookingId: bookingId,
+          bufferMinutes: businessSettings.appointmentBufferMinutes,
+        };
         const conflictsWithSlot = hasScheduleConflict(booking, scheduleEntries, conflictOptions);
         const conflictsWithBooking = hasScheduleConflict(booking, bookingsForDate, conflictOptions);
 
@@ -669,6 +706,206 @@ export async function updateBookingStatus(bookingId, status) {
   }
 
   return { status, rewardGiven, confirmedAt: updateData.confirmedAt || booking.confirmedAt || null };
+}
+
+function getAppointmentChangeRequestId(bookingId, type) {
+  const safeBookingId = String(bookingId || '').replace(/[^A-Za-z0-9_-]/g, '');
+  return `${safeBookingId}_${type}`;
+}
+
+async function createAppointmentChangeRequest(booking, type, details = {}) {
+  if (!isRealtimeDatabaseAvailable() || !auth?.currentUser) throw new Error('Please sign in to manage this appointment.');
+  if (!booking?.id || booking.uid !== auth.currentUser.uid) throw new Error('You can only manage your own appointment.');
+  const settingsSnapshot = await get(ref(rtdb, 'settings/business'));
+  const settings = normalizeBusinessSettings(settingsSnapshot.exists() ? settingsSnapshot.val() : {});
+  const action = type === 'cancellation' ? 'cancel' : 'reschedule';
+  const eligibility = canManageAppointmentOnline(booking, action, settings);
+  if (!eligibility.allowed) throw new Error(eligibility.reason);
+
+  if (type === 'reschedule') {
+    const restriction = getBookingDateRestriction(details.requestedDate, settings, new Date());
+    if (restriction) throw new Error(`That date is unavailable: ${restriction}.`);
+    const slots = getBookableTimeSlots(details.requestedDate, getAppointmentDurationMinutes(booking), settings, new Date());
+    if (!slots.includes(details.requestedTime)) throw new Error('That time is outside the current online booking availability.');
+    const scheduleEntries = await readScheduleDate(details.requestedDate);
+    if (hasReachedDailyAppointmentLimit(scheduleEntries, details.requestedDate, settings, Date.now(), booking.id)
+      || hasScheduleConflict({ ...booking, date: details.requestedDate, time: details.requestedTime, startMinutes: undefined, endMinutes: undefined }, scheduleEntries, {
+        includePendingHolds: true,
+        excludeBookingId: booking.id,
+        bufferMinutes: settings.appointmentBufferMinutes,
+      })) {
+      throw new ScheduleConflictError('That reschedule time is no longer available. Please choose another time.');
+    }
+  }
+
+  const requestId = getAppointmentChangeRequestId(booking.id, type);
+  const requestRef = ref(rtdb, `appointmentChangeRequests/${requestId}`);
+  const existingSnapshot = await get(requestRef);
+  if (existingSnapshot.exists() && existingSnapshot.val()?.status === 'Pending') {
+    throw new Error(`A ${type} request is already awaiting Admin review.`);
+  }
+  const now = Date.now();
+  const payload = {
+    id: requestId,
+    bookingId: booking.id,
+    uid: auth.currentUser.uid,
+    type,
+    status: 'Pending',
+    reason: String(details.reason || '').trim().slice(0, 500),
+    createdAt: now,
+    seenByAdmin: false,
+    ...(type === 'reschedule' ? {
+      requestedDate: String(details.requestedDate || ''),
+      requestedTime: String(details.requestedTime || ''),
+    } : {}),
+  };
+  await set(requestRef, payload);
+  return payload;
+}
+
+export function requestAppointmentCancellation(booking, reason = '') {
+  return createAppointmentChangeRequest(booking, 'cancellation', { reason });
+}
+
+export function requestAppointmentReschedule(booking, requestedDate, requestedTime, reason = '') {
+  return createAppointmentChangeRequest(booking, 'reschedule', { requestedDate, requestedTime, reason });
+}
+
+function mapAppointmentChangeRequests(snapshot) {
+  const requests = [];
+  snapshot.forEach((child) => requests.push({ id: child.key, ...(child.val() || {}) }));
+  return requests.sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
+}
+
+export function listenToAppointmentChangeRequests(callback, errorCallback) {
+  if (!isRealtimeDatabaseAvailable()) {
+    callback([]);
+    return () => {};
+  }
+  return onValue(ref(rtdb, 'appointmentChangeRequests'), (snapshot) => {
+    callback(mapAppointmentChangeRequests(snapshot));
+  }, (error) => errorCallback?.(error));
+}
+
+export function listenToUserAppointmentChangeRequests(uid, callback, errorCallback) {
+  if (!uid || !isRealtimeDatabaseAvailable()) {
+    callback([]);
+    return () => {};
+  }
+  const requestsQuery = rtdbQuery(ref(rtdb, 'appointmentChangeRequests'), orderByChild('uid'), equalTo(uid));
+  return onValue(requestsQuery, (snapshot) => {
+    callback(mapAppointmentChangeRequests(snapshot));
+  }, (error) => errorCallback?.(error));
+}
+
+async function rescheduleConfirmedBooking(bookingId, requestedDate, requestedTime, settings) {
+  const bookingRef = ref(rtdb, `bookings/${bookingId}`);
+  const snapshot = await get(bookingRef);
+  if (!snapshot.exists()) throw new Error('The appointment no longer exists.');
+  const booking = { id: bookingId, ...(snapshot.val() || {}) };
+  if (!isConfirmedScheduleStatus(booking.status)) throw new Error('Only a confirmed appointment can be rescheduled.');
+  if (booking.date === requestedDate && booking.time === requestedTime) throw new Error('Choose a different appointment time.');
+  const restriction = getBookingDateRestriction(requestedDate, settings, new Date());
+  if (restriction) throw new Error(`That date is unavailable: ${restriction}.`);
+  const allowedSlots = getBookableTimeSlots(requestedDate, getAppointmentDurationMinutes(booking), settings, new Date());
+  if (!allowedSlots.includes(requestedTime)) throw new Error('That time is outside online booking availability.');
+
+  const locks = [];
+  try {
+    for (const dateKey of [...new Set([booking.date, requestedDate])].sort()) {
+      locks.push(await acquireScheduleMutex(dateKey, auth?.currentUser?.uid || booking.uid));
+    }
+    const [scheduleEntries, bookingsForDate] = await Promise.all([
+      readScheduleDate(requestedDate),
+      readBookingsForDate(requestedDate),
+    ]);
+    const candidate = { ...booking, date: requestedDate, time: requestedTime, startMinutes: undefined, endMinutes: undefined };
+    const conflictOptions = {
+      includePendingHolds: true,
+      excludeBookingId: bookingId,
+      bufferMinutes: settings.appointmentBufferMinutes,
+    };
+    if (hasReachedDailyAppointmentLimit(scheduleEntries, requestedDate, settings, Date.now(), bookingId)
+      || hasScheduleConflict(candidate, scheduleEntries, conflictOptions)
+      || hasScheduleConflict(candidate, bookingsForDate, { ...conflictOptions, includePendingHolds: false })) {
+      throw new ScheduleConflictError('That reschedule time is no longer available. Please choose another time.');
+    }
+    const confirmedEntry = createScheduleEntry(candidate, 'Confirmed');
+    if (!confirmedEntry) throw new Error('The requested schedule is incomplete.');
+    const updatedAt = new Date().toISOString();
+    const updates = {
+      [`bookings/${bookingId}/date`]: requestedDate,
+      [`bookings/${bookingId}/time`]: requestedTime,
+      [`bookings/${bookingId}/durationMinutes`]: confirmedEntry.durationMinutes,
+      [`bookings/${bookingId}/startMinutes`]: confirmedEntry.startMinutes,
+      [`bookings/${bookingId}/endMinutes`]: confirmedEntry.endMinutes,
+      [`bookings/${bookingId}/updatedAt`]: updatedAt,
+      [`bookings/${bookingId}/rescheduledAt`]: updatedAt,
+      [`bookings/${bookingId}/rescheduledBy`]: 'admin-approved-customer-request',
+      [`bookings/${bookingId}/reminders`]: null,
+      [`scheduleSlots/${requestedDate}/${bookingId}`]: confirmedEntry,
+    };
+    if (booking.date !== requestedDate) updates[`scheduleSlots/${booking.date}/${bookingId}`] = null;
+    await update(ref(rtdb), updates);
+    return { ...booking, date: requestedDate, time: requestedTime };
+  } finally {
+    await Promise.allSettled(locks.map(releaseScheduleMutex));
+  }
+}
+
+async function createAppointmentRequestDecisionNotification(request, approved, booking, settings) {
+  const isCancellation = request.type === 'cancellation';
+  const enabled = isCancellation ? settings.cancellationNotificationEnabled : settings.rescheduleNotificationEnabled;
+  if (!enabled) return;
+  const notificationId = `${request.id}_${approved ? 'approved' : 'declined'}`;
+  const title = `${isCancellation ? 'Cancellation' : 'Reschedule'} Request ${approved ? 'Approved' : 'Declined'}`;
+  const message = approved
+    ? isCancellation
+      ? 'Your appointment has been successfully cancelled.'
+      : `Your appointment was rescheduled to ${request.requestedDate} at ${request.requestedTime}.`
+    : `Your ${isCancellation ? 'cancellation' : 'reschedule'} request was declined. Your appointment remains confirmed.`;
+  await set(ref(rtdb, `notifications/${request.uid}/${notificationId}`), {
+    type: isCancellation ? 'booking_cancelled' : 'booking_rescheduled',
+    title,
+    message,
+    bookingId: booking.id,
+    read: false,
+    createdAt: Date.now(),
+  });
+}
+
+export async function reviewAppointmentChangeRequest(requestId, decision) {
+  if (!isRealtimeDatabaseAvailable() || !auth?.currentUser) throw new Error('Admin authentication is required.');
+  if (!['Approved', 'Declined'].includes(decision)) throw new Error('Choose a valid request decision.');
+  const requestRef = ref(rtdb, `appointmentChangeRequests/${requestId}`);
+  const requestSnapshot = await get(requestRef);
+  if (!requestSnapshot.exists()) throw new Error('This request no longer exists.');
+  const request = { id: requestId, ...(requestSnapshot.val() || {}) };
+  if (request.status !== 'Pending') throw new Error('This request has already been reviewed.');
+  const bookingSnapshot = await get(ref(rtdb, `bookings/${request.bookingId}`));
+  if (!bookingSnapshot.exists()) throw new Error('The related appointment no longer exists.');
+  let booking = { id: request.bookingId, ...(bookingSnapshot.val() || {}) };
+  const settingsSnapshot = await get(ref(rtdb, 'settings/business'));
+  const settings = normalizeBusinessSettings(settingsSnapshot.exists() ? settingsSnapshot.val() : {});
+
+  if (decision === 'Approved') {
+    if (request.type === 'cancellation') {
+      if (!isConfirmedScheduleStatus(booking.status)) throw new Error('Only a confirmed appointment can be cancelled.');
+      await updateBookingStatus(request.bookingId, 'Cancelled');
+      booking = { ...booking, status: 'Cancelled' };
+    } else {
+      booking = await rescheduleConfirmedBooking(request.bookingId, request.requestedDate, request.requestedTime, settings);
+    }
+  }
+
+  await update(requestRef, {
+    status: decision,
+    seenByAdmin: true,
+    reviewedAt: new Date().toISOString(),
+    reviewedBy: auth.currentUser.uid,
+  });
+  await createAppointmentRequestDecisionNotification(request, decision === 'Approved', booking, settings);
+  return { status: decision };
 }
 
 function sanitizePortfolioItem(item) {
@@ -778,11 +1015,14 @@ export async function saveBusinessSettings(settings) {
     throw new Error('Realtime Database is not initialized.');
   }
 
+  const validationErrors = validateBusinessSettingsPatch(settings);
+  if (validationErrors.length) throw new Error(validationErrors[0]);
+
   const payload = {
     ...settings,
     updatedAt: new Date().toISOString(),
   };
-  await set(ref(rtdb, 'settings/business'), payload);
+  await update(ref(rtdb, 'settings/business'), payload);
   return payload;
 }
 
@@ -997,11 +1237,15 @@ async function syncCustomerRecord(user) {
     const mergedProfile = mergeProfileData(storedProfile, normalizedProfile);
     // Keep completion rewards and loyalty history untouched during sign-in sync.
     await update(userRef, createProfileUpdate(normalizedProfile));
+    const verifiedSnapshot = await get(userRef);
+    if (!verifiedSnapshot.exists() || verifiedSnapshot.child('uid').val() !== user.uid) {
+      throw new Error('The customer profile could not be verified after it was saved.');
+    }
     writeStoredProfile(user.uid, mergedProfile);
     return mergedProfile;
   } catch (error) {
     console.warn('Unable to create or update user record', error);
-    return null;
+    throw error;
   }
 }
 
@@ -1025,7 +1269,7 @@ export function createOrUpdateCustomerRecord(user) {
 }
 
 export async function prepareImageForUpload(file, folder = 'portfolio', options = {}) {
-  const supportedType = ['image/jpeg', 'image/png', 'image/webp'].includes(file?.type);
+  const supportedType = ALLOWED_IMAGE_TYPES.includes(String(file?.type || '').toLowerCase());
   if (!supportedType || typeof window === 'undefined' || typeof createImageBitmap !== 'function') return file;
 
   const maxDimension = Number(options.maxDimension)
@@ -1058,29 +1302,78 @@ export async function prepareImageForUpload(file, folder = 'portfolio', options 
   }
 }
 
+export { getImageFileValidationError } from './imageUploadConfig';
+
+export function getImageUploadErrorMessage(error) {
+  const code = String(error?.code || '').toLowerCase();
+  const status = Number(error?.status_ || error?.status || 0);
+  if (status === 404 && code === 'storage/unknown') {
+    return 'Firebase Storage is not available for this project. Finish enabling Storage, then try again.';
+  }
+  switch (code) {
+    case 'storage/unauthenticated':
+      return 'Your session has expired. Please sign in again before uploading.';
+    case 'storage/admin-required':
+      return 'This account is not authorized to upload portfolio photos.';
+    case 'storage/unauthorized':
+      return "We couldn't upload this image. Check its file type and size, then try again.";
+    case 'storage/canceled':
+      return 'The upload was canceled. Please select the photo and try again.';
+    case 'storage/retry-limit-exceeded':
+      return 'The upload timed out. Check your connection and try again.';
+    case 'storage/object-not-found':
+      return 'The uploaded photo could not be found. Please try again.';
+    case 'storage/invalid-format':
+      return error?.message || 'Please choose a valid JPG, PNG, or WebP image.';
+    default:
+      return 'The photo could not be uploaded. Please try again.';
+  }
+}
+
+function createImageUploadError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 export async function uploadImageFile(file, folder = 'portfolio', onProgress, options = {}) {
-  if (!app) {
+  if (!app || !storage || !auth) {
     throw new Error('Firebase not initialized. Call initFirebase first.');
   }
 
-  if (!file) throw new Error('No file provided for upload');
+  const validationError = getImageFileValidationError(file, folder);
+  if (validationError) throw createImageUploadError('storage/invalid-format', validationError);
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw createImageUploadError('storage/unauthenticated', 'Authentication is required before uploading.');
+  }
+  if (!PORTFOLIO_UPLOAD_FOLDERS.has(folder) && !CUSTOMER_UPLOAD_FOLDERS.has(folder)) {
+    throw createImageUploadError('storage/unauthorized', 'This upload destination is not allowed.');
+  }
+  if (PORTFOLIO_UPLOAD_FOLDERS.has(folder)) {
+    const authorization = await checkUserAuthorization(currentUser.uid, currentUser.email);
+    if (!authorization.isAdmin || authorization.status !== 'active') {
+      throw createImageUploadError('storage/admin-required', 'Admin authorization is required for portfolio uploads.');
+    }
+  }
 
   try {
     const uploadFile = await prepareImageForUpload(file, folder, options);
-    const {
-      getStorage,
-      ref: storageRef,
-      uploadBytes,
-      getDownloadURL,
-      uploadBytesResumable,
-    } = await import('firebase/storage');
-    const storage = getStorage(app);
+    const processedFileValidationError = getImageFileValidationError(uploadFile, folder);
+    if (processedFileValidationError) {
+      throw createImageUploadError('storage/invalid-format', processedFileValidationError);
+    }
     const safeName = String(uploadFile.name || 'upload').replace(/[^a-zA-Z0-9._-]/g, '_');
-    const path = `${folder}/${Date.now()}_${safeName}`;
+    const basePath = CUSTOMER_UPLOAD_FOLDERS.has(folder)
+      ? `${folder}/${currentUser.uid}`
+      : folder;
+    const path = `${basePath}/${Date.now()}_${safeName}`;
     const sRef = storageRef(storage, path);
 
     // Use resumable upload to report progress when requested
     if (typeof onProgress === 'function') {
+      onProgress(0);
       const task = uploadBytesResumable(sRef, uploadFile);
       return await new Promise((resolve, reject) => {
         task.on(
@@ -1092,6 +1385,7 @@ export async function uploadImageFile(file, folder = 'portfolio', onProgress, op
           (error) => reject(error),
           async () => {
             try {
+              onProgress(100);
               const url = await getDownloadURL(sRef);
               resolve(url);
             } catch (err) {
@@ -1106,7 +1400,10 @@ export async function uploadImageFile(file, folder = 'portfolio', onProgress, op
     const url = await getDownloadURL(sRef);
     return url;
   } catch (error) {
-    console.warn('Failed to upload image file to Firebase Storage', error);
+    console.warn('Failed to upload image file to Firebase Storage', {
+      code: error?.code || 'storage/unknown',
+      status: error?.status_ || error?.status || null,
+    });
     throw error;
   }
 }

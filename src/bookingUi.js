@@ -26,6 +26,9 @@ export function getCalendarCells(monthDate, options = {}) {
   const todayKey = options.todayKey || toLocalDateKey(new Date());
   const closedWeekdays = new Set(options.closedWeekdays || []);
   const fullyBookedDates = options.fullyBookedDates || new Set();
+  const blackoutDates = options.blackoutDates || new Set();
+  const maximumDateKey = options.maximumDateKey || '';
+  const allowSameDayBooking = options.allowSameDayBooking !== false;
   const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const cells = Array.from({ length: firstWeekday }, () => null);
@@ -34,15 +37,21 @@ export function getCalendarCells(monthDate, options = {}) {
     const value = new Date(year, month, day);
     const key = toLocalDateKey(value);
     const isPast = key < todayKey;
+    const isSameDayUnavailable = !allowSameDayBooking && key === todayKey;
+    const isBeyondAdvanceWindow = Boolean(maximumDateKey && key > maximumDateKey);
     const isClosed = closedWeekdays.has(value.getDay());
+    const isBlackout = blackoutDates.has(key);
     const isFullyBooked = fullyBookedDates.has(key);
     cells.push({
       day,
       key,
       isPast,
-      isClosed,
+      isClosed: isClosed || isBlackout,
+      isBlackout,
+      isSameDayUnavailable,
+      isBeyondAdvanceWindow,
       isFullyBooked,
-      disabled: isPast || isClosed || isFullyBooked,
+      disabled: isPast || isSameDayUnavailable || isBeyondAdvanceWindow || isClosed || isBlackout || isFullyBooked,
     });
   }
 

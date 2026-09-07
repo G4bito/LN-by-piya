@@ -2,17 +2,20 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   getCustomerProfile,
+  listenToUserAppointmentChangeRequests,
   listenToCustomerLoyalty,
   listenToLoyaltyProgram,
   logOut,
+  requestAppointmentCancellation,
   saveCustomerProfile,
   updateAppointmentReminderPreference,
 } from '../firebase';
-import { SERVICES, formatPeso, NAIL_ART_ADD_ON } from '../constants/services';
+import { SERVICES, formatPeso } from '../constants/services';
 import { isValidPhoneNumber } from '../validation';
 import { getBookingNailArt, getBookingNailQuantity } from '../bookingPricing';
 import { getLoyaltyState } from '../loyaltyProgram';
 import LuxeDynamicBackground from '../components/LuxeDynamicBackground';
+import { canManageAppointmentOnline, normalizeBusinessSettings } from '../businessSettings';
 
 const NAME_REGEX = /^[A-Za-zÀ-ÖØ-öø-ÿ' -]{2,60}$/;
 
@@ -28,7 +31,7 @@ function getTimeMinutes(value) {
   const [hourValue = '0', minuteValue = '0'] = String(value || '').split(':');
   let hour = Number(hourValue);
   const minute = Number(minuteValue);
-  if (hour > 0 && hour < 9) hour += 12;
+  if (hourValue.length === 1 && hour > 0 && hour < 9) hour += 12;
   return (hour * 60) + minute;
 }
 
@@ -64,7 +67,8 @@ function getStatusClass(status) {
   return 'is-pending';
 }
 
-function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment, onBookAgain }) {
+function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment, onBookAgain, onRescheduleAppointment, businessSettings }) {
+  const settings = useMemo(() => normalizeBusinessSettings(businessSettings), [businessSettings]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
@@ -87,6 +91,9 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
   const [loyaltyError, setLoyaltyError] = useState('');
   const [rewardHistoryOpen, setRewardHistoryOpen] = useState(false);
   const [allRewardsOpen, setAllRewardsOpen] = useState(false);
+  const [appointmentActionStatus, setAppointmentActionStatus] = useState('');
+  const [appointmentActionSaving, setAppointmentActionSaving] = useState(false);
+  const [appointmentChangeRequests, setAppointmentChangeRequests] = useState([]);
   const rewardModalBodyRef = useRef(null);
 
   const cleanedName = name.trim().replace(/\s+/g, ' ');
@@ -192,6 +199,18 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
       unsubscribeProfile();
       unsubscribeProgram();
     };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setAppointmentChangeRequests([]);
+      return undefined;
+    }
+    return listenToUserAppointmentChangeRequests(
+      user.uid,
+      setAppointmentChangeRequests,
+      () => setAppointmentActionStatus('Appointment requests could not be refreshed right now.')
+    );
   }, [user?.uid]);
 
   useEffect(() => {
@@ -334,6 +353,26 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
   const nextBookingQuantity = getBookingNailQuantity(appointmentData.next);
   const nextBookingService = SERVICES.find((serviceItem) => serviceItem.id === appointmentData.next?.service);
   const nextBookingNailArt = getBookingNailArt(appointmentData.next, nextBookingService);
+  const cancellationEligibility = canManageAppointmentOnline(appointmentData.next, 'cancel', settings);
+  const rescheduleEligibility = canManageAppointmentOnline(appointmentData.next, 'reschedule', settings);
+  const pendingCancellationRequest = appointmentChangeRequests.find((request) => request.bookingId === appointmentData.next?.id && request.type === 'cancellation' && request.status === 'Pending');
+  const pendingRescheduleRequest = appointmentChangeRequests.find((request) => request.bookingId === appointmentData.next?.id && request.type === 'reschedule' && request.status === 'Pending');
+
+  const handleCancelAppointment = async () => {
+    if (!appointmentData.next?.id || !cancellationEligibility.allowed || appointmentActionSaving) return;
+    if (!window.confirm('Send a cancellation request to the salon? Your appointment stays confirmed until the request is approved.')) return;
+    const reason = window.prompt('Reason for cancellation (optional):', '') || '';
+    setAppointmentActionSaving(true);
+    setAppointmentActionStatus('Sending cancellation request...');
+    try {
+      await requestAppointmentCancellation(appointmentData.next, reason);
+      setAppointmentActionStatus('Cancellation request sent ✓');
+    } catch (error) {
+      setAppointmentActionStatus(error?.message || 'The cancellation request could not be sent. Please try again.');
+    } finally {
+      setAppointmentActionSaving(false);
+    }
+  };
   const displayName = name || user?.displayName || 'Welcome';
   const initials = displayName
     .split(' ')
@@ -483,7 +522,7 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
                 ) : null}
                 <div className="profile-metric">
                   <span>Nail Art</span>
-                  <strong>{nextBookingNailArt.enabled ? `${nextBookingNailArt.quantity} nails × ${formatPeso(NAIL_ART_ADD_ON.pricePerNail)}` : 'None'}</strong>
+                  <strong>{nextBookingNailArt.enabled ? `${nextBookingNailArt.quantity} nails × ${formatPeso(nextBookingNailArt.pricePerNail)}` : 'None'}</strong>
                 </div>
                 {nextBookingNailArt.enabled ? (
                   <div className="profile-metric">
@@ -503,14 +542,37 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
                     <strong>{formatPeso(appointmentData.next.estimatedTotal || appointmentData.next.totalPrice)}</strong>
                   </div>
                 ) : null}
+                {String(appointmentData.next.status || '').toLowerCase() === 'confirmed' && (settings.allowCustomerCancellation || settings.allowCustomerReschedule) ? (
+                  <div className="profile-appointment-actions">
+                    {settings.allowCustomerReschedule ? <button type="button" className="btn-secondary" disabled={!rescheduleEligibility.allowed || appointmentActionSaving || Boolean(pendingRescheduleRequest)} onClick={() => onRescheduleAppointment?.(appointmentData.next)}>{pendingRescheduleRequest ? 'Reschedule pending' : 'Request reschedule'}</button> : null}
+                    {settings.allowCustomerCancellation ? <button type="button" className="btn-ghost profile-cancel-appointment" disabled={!cancellationEligibility.allowed || appointmentActionSaving || Boolean(pendingCancellationRequest)} onClick={handleCancelAppointment}>{pendingCancellationRequest ? 'Cancellation pending' : 'Request cancellation'}</button> : null}
+                    {!cancellationEligibility.allowed && settings.allowCustomerCancellation ? <p className="muted">{cancellationEligibility.reason}</p> : null}
+                    {!rescheduleEligibility.allowed && settings.allowCustomerReschedule ? <p className="muted">{rescheduleEligibility.reason}</p> : null}
+                    {pendingCancellationRequest || pendingRescheduleRequest ? <p className="muted">Your appointment and time slot remain confirmed while the salon reviews the request.</p> : null}
+                    {appointmentActionStatus ? <p className="profile-status" role="status">{appointmentActionStatus}</p> : null}
+                  </div>
+                ) : null}
               </>
             ) : (
               <div className="profile-empty-state">
                 <p className="muted">You have no upcoming appointments.</p>
+                {appointmentActionStatus ? <p className="profile-status" role="status">{appointmentActionStatus}</p> : null}
                 <button type="button" className="btn-primary" onClick={onBookAppointment}>Book an appointment</button>
               </div>
             )}
           </div>
+
+          <section className="card profile-policies-card" aria-labelledby="profile-policies-title">
+            <h3 id="profile-policies-title">Appointment policies</h3>
+            <p className="profile-intro">Please review these salon guidelines before your visit.</p>
+            <div className="profile-policy-list">
+              {settings.cancellationPolicy ? <div><strong>Cancellation</strong><p>{settings.cancellationPolicy}</p></div> : null}
+              {settings.lateArrivalPolicy ? <div><strong>Late arrival</strong><p>{settings.lateArrivalPolicy}</p></div> : null}
+              {settings.noShowPolicy ? <div><strong>No-show</strong><p>{settings.noShowPolicy}</p></div> : null}
+              {settings.appointmentPreparationNote ? <div><strong>Before your appointment</strong><p>{settings.appointmentPreparationNote}</p></div> : null}
+              <div><strong>Online appointment changes</strong><p>{settings.allowCustomerCancellation ? `Cancellation requests are accepted up to ${settings.cancellationDeadlineHours} hours before a confirmed appointment.` : 'Online cancellation requests are not currently available.'} {settings.allowCustomerReschedule ? `Reschedule requests are accepted up to ${settings.rescheduleDeadlineHours} hours before a confirmed appointment.` : 'Online reschedule requests are not currently available.'}</p></div>
+            </div>
+          </section>
 
           <div className={`card profile-loyalty-card ${loyaltyState.availableRewards > 0 ? 'is-reward-available' : ''}`}>
             <h3>Loyalty rewards</h3>
@@ -718,13 +780,13 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
           <div className="card profile-notifications-card">
             <div>
               <h3>Notification preferences</h3>
-              <p className="profile-intro">Choose whether appointment reminder emails are sent to {user?.email || 'your account email'}.</p>
-              <small>In-app reminders will still appear in your notification bell.</small>
+              <p className="profile-intro">Choose whether enabled appointment reminder emails are sent to {user?.email || 'your account email'}.</p>
+              <small>{settings.inAppReminderEnabled ? 'Enabled in-app reminders will also appear in your notification bell.' : 'In-app reminders are currently disabled by the salon.'}</small>
             </div>
             <div className="profile-notification-control">
               <span>
                 <strong>Email appointment reminders</strong>
-                <small>24 hours and 12 hours before confirmed appointments</small>
+                <small>{[settings.reminder24hEnabled && '24 hours', settings.reminder12hEnabled && '12 hours'].filter(Boolean).join(' and ') || 'No reminder schedule is currently enabled'} before confirmed appointments</small>
               </span>
               <button
                 type="button"
@@ -732,7 +794,7 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
                 role="switch"
                 aria-checked={emailAppointmentReminders}
                 aria-label="Email appointment reminders"
-                disabled={notificationPreferenceSaving}
+                disabled={notificationPreferenceSaving || (!settings.reminder24hEnabled && !settings.reminder12hEnabled)}
                 onClick={handleEmailReminderToggle}
               >
                 <span aria-hidden="true" />
@@ -767,7 +829,7 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
                             {bookingQuantity} {bookingQuantity === 1 ? 'nail' : 'nails'} at {formatPeso(booking.pricePerNail || bookingService?.price || 0)} / nail
                           </small>
                         ) : null}
-                        <small>Nail Art: {bookingNailArt.enabled ? `${bookingNailArt.quantity} nails × ${formatPeso(NAIL_ART_ADD_ON.pricePerNail)} = ${formatPeso(bookingNailArt.total)}` : 'None'}</small>
+                        <small>Nail Art: {bookingNailArt.enabled ? `${bookingNailArt.quantity} nails × ${formatPeso(bookingNailArt.pricePerNail)} = ${formatPeso(bookingNailArt.total)}` : 'None'}</small>
                         {bookingService?.nailArtEligible ? <small>Reference photo: {booking.referenceImageUrl ? 'Attached ✓' : 'Not attached'}</small> : null}
                       </div>
                       <div className="history-item-meta">

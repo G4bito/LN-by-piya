@@ -4424,6 +4424,20 @@ body {
   font-size: 0.72rem;
 }
 
+.service-upload-help,
+.service-selected-file {
+  margin: 0.55rem 0 0;
+  max-width: 100%;
+  color: rgba(244, 234, 217, 0.58);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.service-selected-file {
+  color: rgba(244, 234, 217, 0.78);
+}
+
 .service-upload-status {
   color: var(--gold);
 }
@@ -6179,6 +6193,84 @@ body {
   animation: fadeInUp 0.7s ease-out both;
 }
 
+.booking-policy-review {
+  margin-top: 0.9rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: rgba(201, 168, 118, 0.045);
+}
+
+.booking-policy-review strong {
+  color: var(--gold-light);
+  font-size: 0.78rem;
+}
+
+.booking-policy-review p {
+  margin: 0.4rem 0 0;
+  color: rgba(244, 234, 217, 0.67);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.profile-policies-card {
+  grid-column: 1 / -1;
+  order: 3;
+  padding: 1.35rem 1.45rem;
+  background: rgba(20, 16, 15, 0.94);
+}
+
+.profile-policy-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.profile-policy-list > div {
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.profile-policy-list strong {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--gold-light);
+  font-size: 0.76rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.profile-policy-list p {
+  margin: 0;
+  color: rgba(244, 234, 217, 0.68);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.profile-appointment-actions {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  border-top: 1px solid var(--line-soft);
+}
+
+.profile-appointment-actions .muted,
+.profile-appointment-actions .profile-status {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.74rem;
+}
+
+.profile-cancel-appointment {
+  color: #e3aaa0;
+  border-color: rgba(181, 93, 79, 0.45);
+}
+
 .profile-notifications-card h3 {
   margin-bottom: 0.4rem;
 }
@@ -6275,6 +6367,10 @@ body {
 
   .profile-notification-control {
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .profile-policy-list {
+    grid-template-columns: 1fr;
   }
 }
 

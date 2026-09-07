@@ -4,6 +4,7 @@ import Services from '../components/Services';
 import PriceList from '../components/PriceList';
 import LuxeDynamicBackground from '../components/LuxeDynamicBackground';
 import { SERVICES } from '../constants/services';
+import { formatWeeklyBusinessHours, normalizeBusinessSettings } from '../businessSettings';
 
 const POPULAR_SERVICE_IDS = [
   'gel-manicure',
@@ -22,7 +23,7 @@ const POPULAR_PRICE_IDS = [
 ];
 
 const DEFAULT_BUSINESS_INFO = {
-  location: import.meta.env.VITE_BUSINESS_LOCATION || '',
+  address: import.meta.env.VITE_BUSINESS_LOCATION || '',
   hours: import.meta.env.VITE_BUSINESS_HOURS || '',
   phone: import.meta.env.VITE_BUSINESS_PHONE || '',
   email: import.meta.env.VITE_BUSINESS_EMAIL || '',
@@ -56,11 +57,14 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
   const publishedReviews = reviews.filter((review) => (
     review && (review.comment || review.message || review.review || review.reviewText)
   )).slice(0, 3);
-  const business = { ...DEFAULT_BUSINESS_INFO, ...(businessInfo || {}) };
+  const normalizedBusiness = normalizeBusinessSettings({ ...DEFAULT_BUSINESS_INFO, ...(businessInfo || {}) });
+  const business = { ...DEFAULT_BUSINESS_INFO, ...normalizedBusiness, ...(businessInfo || {}) };
   const facebookUrl = business.facebookUrl || FACEBOOK_URL;
+  const publishedBusinessHours = business.businessHoursConfigured
+    ? formatWeeklyBusinessHours(business.businessHours)
+    : business.legacyBusinessHoursText || business.hours;
   const businessDetails = [
-    { label: 'Location', value: business.location },
-    { label: 'Business hours', value: business.hours },
+    { label: 'Location', value: business.address },
     { label: 'Contact number', value: business.phone },
     { label: 'Email', value: business.email },
   ].filter((detail) => detail.value);
@@ -80,9 +84,9 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
         <LuxeDynamicBackground />
         <div className="hero-content">
           <span className="eyebrow">Your nails, our art</span>
-          <h1>Luxe Nails by Piya</h1>
+          <h1>{business.businessName}</h1>
           <p className="subtitle">Luxury {'\u00b7'} Precision {'\u00b7'} Perfection</p>
-          <p className="home-hero-tagline">Beautiful nails, designed just for you.</p>
+          <p className="home-hero-tagline">{business.tagline || 'Beautiful nails, designed just for you.'}</p>
           <div className="home-hero-actions">
             <button type="button" className="btn-primary" onClick={() => onBookService?.()}>
               Book Appointment
@@ -115,6 +119,7 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
             onBookService={onBookService}
             showPricing
             showDetailsAction
+            businessSettings={business}
           />
           <div className="home-section-action">
             <button type="button" className="gallery-toggle" onClick={() => setShowAllServices((current) => !current)}>
@@ -174,8 +179,8 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
             </div>
           ) : (
             <div className="card home-empty-state">
-              <strong>No customer reviews yet</strong>
-              <p>Published customer reviews will appear here.</p>
+              <strong>COMING SOON</strong>
+              <p>We’re currently working on our customer review system. Soon, you’ll be able to share your experience, rate your appointment, and help others discover Luxe Nails by Piya.</p>
             </div>
           )}
         </section>
@@ -204,6 +209,17 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
                     <dd>{detail.value}</dd>
                   </div>
                 ))}
+                {Array.isArray(publishedBusinessHours) ? publishedBusinessHours.map((hours) => (
+                  <div key={hours.label}>
+                    <dt>{hours.label}</dt>
+                    <dd>{hours.value}</dd>
+                  </div>
+                )) : publishedBusinessHours ? (
+                  <div>
+                    <dt>Business hours</dt>
+                    <dd>{publishedBusinessHours}</dd>
+                  </div>
+                ) : null}
                 {socialLinks.map((link) => (
                   <div key={link.label}>
                     <dt>{link.label}</dt>
@@ -231,8 +247,8 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
       <footer className="home-footer">
         <div className="home-footer-inner">
           <div className="home-footer-brand">
-            <strong>Luxe Nails by Piya</strong>
-            <span>Luxury {'\u00b7'} Precision {'\u00b7'} Perfection</span>
+            <strong>{business.businessName}</strong>
+            <span>{business.tagline || <>Luxury {'\u00b7'} Precision {'\u00b7'} Perfection</>}</span>
           </div>
           <nav className="home-footer-links" aria-label="Footer navigation">
             <a href="#top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Home</a>
@@ -245,7 +261,7 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
             <a href={facebookUrl} target="_blank" rel="noopener noreferrer">Facebook</a>
             {business.instagramUrl ? <a href={business.instagramUrl} target="_blank" rel="noopener noreferrer">Instagram</a> : null}
           </div>
-          <p>&copy; 2026 Luxe Nails by Piya</p>
+          <p>&copy; 2026 {business.businessName}</p>
         </div>
       </footer>
     </div>

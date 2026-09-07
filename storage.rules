@@ -1,0 +1,52 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.uid == "Q9GKmLkfxdVjnOijI3YUbwaTOMF3";
+    }
+
+    function isAllowedImageType() {
+      return request.resource != null
+        && request.resource.contentType != null
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
+    }
+
+    function isValidPortfolioImage() {
+      return isAllowedImageType()
+        && request.resource.size <= 8 * 1024 * 1024;
+    }
+
+    function isValidReferenceImage() {
+      return isAllowedImageType()
+        && request.resource.size <= 5 * 1024 * 1024;
+    }
+
+    match /portfolio/{fileName} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidPortfolioImage();
+      allow delete: if isAdmin();
+    }
+
+    match /portfolio-thumbnails/{fileName} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidPortfolioImage();
+      allow delete: if isAdmin();
+    }
+
+    match /booking-references/{userId}/{fileName} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || isAdmin());
+      allow create, update: if isSignedIn()
+        && request.auth.uid == userId
+        && isValidReferenceImage();
+      allow delete: if isSignedIn()
+        && (request.auth.uid == userId || isAdmin());
+    }
+  }
+}

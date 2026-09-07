@@ -25,10 +25,10 @@ import {
 } from './passwordResetCore.js';
 import {
   DEFAULT_SALON_TIME_ZONE,
-  REMINDER_DEFINITIONS,
   buildAppointmentReminderContent,
   getReminderClaimDecision,
   getReminderEligibility,
+  getReminderRuntimeSettings,
   isValidTimeZone,
 } from './appointmentReminderCore.js';
 
@@ -550,17 +550,17 @@ function createReminderEmail(content) {
   )).join('');
 
   return {
-    text: `LUXE NAILS BY PIYA\n\nAPPOINTMENT REMINDER\n\nHi ${content.customerName},\n\n${content.intro}\n\n${detailText}\n\nWe look forward to seeing you. Please arrive on time for your appointment.\n\nLuxe Nails by Piya`,
+    text: `${content.businessName.toUpperCase()}\n\nAPPOINTMENT REMINDER\n\nHi ${content.customerName},\n\n${content.intro}\n\n${detailText}\n\nWe look forward to seeing you. Please arrive on time for your appointment.\n\n${content.businessName}`,
     html: `<div style="margin:0;background:#0b0a0a;padding:28px 14px;color:#f4ead9;font-family:Arial,sans-serif">`
       + `<div style="max-width:560px;margin:0 auto;border:1px solid rgba(201,168,118,.42);border-radius:16px;background:#15110f;padding:30px">`
-      + '<div style="color:#e9d4a8;font-family:Georgia,serif;font-size:25px">Luxe Nails by Piya</div>'
+      + `<div style="color:#e9d4a8;font-family:Georgia,serif;font-size:25px">${escapeHtml(content.businessName)}</div>`
       + '<div style="margin:8px 0 24px;color:#c9a876;font-size:11px;font-weight:700;letter-spacing:2px">APPOINTMENT REMINDER</div>'
       + `<p style="margin:0 0 12px;line-height:1.6">Hi ${escapeHtml(content.customerName)},</p>`
       + `<p style="margin:0 0 20px;line-height:1.6;color:#ded2c0">${escapeHtml(content.intro)}</p>`
       + detailHtml
       + '<p style="margin:24px 0 5px;line-height:1.6">We look forward to seeing you.</p>'
       + '<p style="margin:0;color:#b9ad9c;line-height:1.6">Please arrive on time for your appointment.</p>'
-      + '<div style="margin-top:26px;color:#c9a876;font-family:Georgia,serif">Luxe Nails by Piya</div>'
+      + `<div style="margin-top:26px;color:#c9a876;font-family:Georgia,serif">${escapeHtml(content.businessName)}</div>`
       + '</div></div>',
   };
 }
@@ -709,7 +709,7 @@ async function createInAppReminder({ booking, reminderType, content, appointment
   return notificationId;
 }
 
-async function deliverAppointmentReminder(claim, reminderType, timeZone, now) {
+async function deliverAppointmentReminder(claim, reminderType, timeZone, now, { inAppEnabled = true, businessName = 'Luxe Nails by Piya' } = {}) {
   const bookingRef = database.ref(`bookings/${claim.booking.id}`);
   const latestSnapshot = await bookingRef.get();
   const latestBooking = latestSnapshot.exists()
@@ -737,6 +737,7 @@ async function deliverAppointmentReminder(claim, reminderType, timeZone, now) {
     reminderType,
     appointmentAt: eligibility.appointmentAt,
     timeZone,
+    businessName,
   });
   let record = currentRecord;
   let emailError = null;
@@ -788,7 +789,12 @@ async function deliverAppointmentReminder(claim, reminderType, timeZone, now) {
     }
   }
 
-  if (record.inAppStatus !== 'sent') {
+  if (!inAppEnabled && !['sent', 'skipped'].includes(record.inAppStatus)) {
+    record = await patchReminderRecord(latestBooking.id, reminderType, claim.operationId, {
+      inAppStatus: 'skipped',
+      inAppSkippedReason: 'salon-disabled',
+    }) || record;
+  } else if (inAppEnabled && record.inAppStatus !== 'sent') {
     try {
       const notificationId = await createInAppReminder({
         booking: latestBooking,
@@ -828,15 +834,22 @@ async function deliverAppointmentReminder(claim, reminderType, timeZone, now) {
   return { status: failed ? 'failed' : 'sent' };
 }
 
-async function processReminderBooking(booking, reminderType, now, timeZone) {
+async function processReminderBooking(booking, reminderType, now, timeZone, runtimeSettings) {
   const claim = await claimAppointmentReminder(booking.id, reminderType, now, timeZone);
   if (!claim.claimed) return { status: 'ignored', reason: claim.reason };
-  return deliverAppointmentReminder(claim, reminderType, timeZone, now);
+  return deliverAppointmentReminder(claim, reminderType, timeZone, now, runtimeSettings);
 }
 
 export async function runAppointmentReminderSweep({ now = Date.now() } = {}) {
-  const timeZone = getSalonTimeZone();
-  const snapshot = await database.ref('bookings').orderByChild('status').equalTo('Confirmed').get();
+  const [settingsSnapshot, snapshot] = await Promise.all([
+    database.ref('settings/business').get(),
+    database.ref('bookings').orderByChild('status').equalTo('Confirmed').get(),
+  ]);
+  const runtimeSettings = getReminderRuntimeSettings(
+    settingsSnapshot.exists() ? settingsSnapshot.val() : {},
+    getSalonTimeZone()
+  );
+  const { timeZone, reminderTypes } = runtimeSettings;
   const bookings = [];
   snapshot.forEach((child) => bookings.push({ id: child.key, ...(child.val() || {}) }));
   const counts = { sent: 0, failed: 0, skipped: 0, ignored: 0 };
@@ -844,8 +857,8 @@ export async function runAppointmentReminderSweep({ now = Date.now() } = {}) {
   for (let index = 0; index < bookings.length; index += 5) {
     const batch = bookings.slice(index, index + 5);
     const results = await Promise.allSettled(batch.flatMap((booking) => (
-      Object.keys(REMINDER_DEFINITIONS).map((reminderType) => (
-        processReminderBooking(booking, reminderType, now, timeZone)
+      reminderTypes.map((reminderType) => (
+        processReminderBooking(booking, reminderType, now, timeZone, runtimeSettings)
       ))
     )));
     results.forEach((result) => {
@@ -865,6 +878,7 @@ export async function runAppointmentReminderSweep({ now = Date.now() } = {}) {
   logger.info('Appointment reminder run completed.', {
     confirmedBookings: bookings.length,
     timeZone,
+    enabledReminderTypes: reminderTypes,
     ...counts,
   });
   return { confirmedBookings: bookings.length, timeZone, ...counts };

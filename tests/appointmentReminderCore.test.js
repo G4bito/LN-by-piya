@@ -4,8 +4,23 @@ import {
   buildAppointmentReminderContent,
   getReminderClaimDecision,
   getReminderEligibility,
+  getReminderRuntimeSettings,
   parseAppointmentDateTime,
 } from '../functions/appointmentReminderCore.js';
+
+test('runtime reminder settings respect Firebase toggles and timezone', () => {
+  assert.deepEqual(getReminderRuntimeSettings({
+    timezone: 'Asia/Manila',
+    reminder24hEnabled: false,
+    reminder12hEnabled: true,
+    inAppReminderEnabled: false,
+  }), {
+    timeZone: 'Asia/Manila',
+    businessName: 'Luxe Nails by Piya',
+    reminderTypes: ['reminder12h'],
+    inAppEnabled: false,
+  });
+});
 
 const HOUR = 60 * 60 * 1000;
 
@@ -30,6 +45,10 @@ test('appointment date and time are interpreted in the salon timezone', () => {
   assert.equal(
     parseAppointmentDateTime('2026-09-10', '09:00', 'Asia/Manila'),
     Date.parse('2026-09-10T01:00:00.000Z')
+  );
+  assert.equal(
+    parseAppointmentDateTime('2026-09-10', '08:00', 'Asia/Manila'),
+    Date.parse('2026-09-10T00:00:00.000Z')
   );
   assert.equal(
     parseAppointmentDateTime('2026-09-10', '2:00', 'Asia/Manila'),
