@@ -52,16 +52,6 @@ export const firebaseConfig = {
   passwordResetContinueUrl: import.meta.env.VITE_PASSWORD_RESET_CONTINUE_URL,
 };
 
-const REQUIRED_FIREBASE_ENVIRONMENT = {
-  apiKey: 'VITE_FIREBASE_API_KEY',
-  authDomain: 'VITE_FIREBASE_AUTH_DOMAIN',
-  databaseURL: 'VITE_FIREBASE_DATABASE_URL',
-  projectId: 'VITE_FIREBASE_PROJECT_ID',
-  storageBucket: 'VITE_FIREBASE_STORAGE_BUCKET',
-  messagingSenderId: 'VITE_FIREBASE_MESSAGING_SENDER_ID',
-  appId: 'VITE_FIREBASE_APP_ID',
-};
-
 let app = null;
 let rtdb = null;
 let auth = null;
@@ -89,10 +79,32 @@ function sanitizeAddress(value) {
   return value.trim();
 }
 
-export function getMissingFirebaseEnvironmentVariables(config = firebaseConfig) {
-  return Object.entries(REQUIRED_FIREBASE_ENVIRONMENT)
-    .filter(([field]) => !String(config?.[field] || '').trim())
-    .map(([, environmentName]) => environmentName);
+export function getMissingFirebaseEnvironmentVariables() {
+  const missingVariables = [];
+
+  if (!String(import.meta.env.VITE_FIREBASE_API_KEY || '').trim()) {
+    missingVariables.push('VITE_FIREBASE_API_KEY');
+  }
+  if (!String(import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '').trim()) {
+    missingVariables.push('VITE_FIREBASE_AUTH_DOMAIN');
+  }
+  if (!String(import.meta.env.VITE_FIREBASE_DATABASE_URL || '').trim()) {
+    missingVariables.push('VITE_FIREBASE_DATABASE_URL');
+  }
+  if (!String(import.meta.env.VITE_FIREBASE_PROJECT_ID || '').trim()) {
+    missingVariables.push('VITE_FIREBASE_PROJECT_ID');
+  }
+  if (!String(import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '').trim()) {
+    missingVariables.push('VITE_FIREBASE_STORAGE_BUCKET');
+  }
+  if (!String(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '').trim()) {
+    missingVariables.push('VITE_FIREBASE_MESSAGING_SENDER_ID');
+  }
+  if (!String(import.meta.env.VITE_FIREBASE_APP_ID || '').trim()) {
+    missingVariables.push('VITE_FIREBASE_APP_ID');
+  }
+
+  return missingVariables;
 }
 
 function getFirebaseAuthenticationUnavailableMessage() {
@@ -197,33 +209,33 @@ function writeStoredProfile(uid, profile) {
   }
 }
 
-export function initFirebase(config = firebaseConfig) {
+export function initFirebase() {
   if (app) return app;
 
-  const missingVariables = getMissingFirebaseEnvironmentVariables(config);
+  const missingVariables = getMissingFirebaseEnvironmentVariables();
   if (missingVariables.length > 0) {
     console.error('Firebase initialization skipped. Missing Vite environment variables:', missingVariables);
     return null;
   }
 
-  app = getApps().length > 0 ? getApp() : initializeApp(config);
-  rtdb = getDatabase(app, config.databaseURL);
+  app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+  rtdb = getDatabase(app, firebaseConfig.databaseURL);
   auth = getAuth(app);
   googleProvider = new GoogleAuthProvider();
-  passwordResetActionCodeSettings = getPasswordResetActionCodeSettings(config.passwordResetContinueUrl);
+  passwordResetActionCodeSettings = getPasswordResetActionCodeSettings(firebaseConfig.passwordResetContinueUrl);
   googleProvider.setCustomParameters({ prompt: 'select_account' });
 
   if (typeof window !== 'undefined' && import.meta.env.DEV) {
     window.__LuxeFirebaseDebug = {
       environment: {
-        apiKey: Boolean(config.apiKey),
-        authDomain: Boolean(config.authDomain),
-        databaseURL: Boolean(config.databaseURL),
-        projectId: Boolean(config.projectId),
-        storageBucket: Boolean(config.storageBucket),
-        messagingSenderId: Boolean(config.messagingSenderId),
-        appId: Boolean(config.appId),
-        measurementId: Boolean(config.measurementId),
+        apiKey: Boolean(firebaseConfig.apiKey),
+        authDomain: Boolean(firebaseConfig.authDomain),
+        databaseURL: Boolean(firebaseConfig.databaseURL),
+        projectId: Boolean(firebaseConfig.projectId),
+        storageBucket: Boolean(firebaseConfig.storageBucket),
+        messagingSenderId: Boolean(firebaseConfig.messagingSenderId),
+        appId: Boolean(firebaseConfig.appId),
+        measurementId: Boolean(firebaseConfig.measurementId),
       },
       runtime: {
         realtime: Boolean(rtdb),
