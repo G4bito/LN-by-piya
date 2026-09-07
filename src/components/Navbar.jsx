@@ -65,9 +65,15 @@ function Navbar({
   return (
     <nav className="navbar">
       <div className="brand-mark" onClick={() => onNavigate(isAdmin ? 'admin' : 'home')} style={{ cursor: 'pointer' }}>
-          <div className="brand-monogram">
-            <img src="/assets/logo.svg" alt="Luxe Nails logo" className="brand-img" />
-          </div>
+        <div className="brand-monogram">
+          <img
+            src="/assets/ln-logo.jpg"
+            alt="Luxe Nails by Piya"
+            className="brand-img"
+            width="46"
+            height="46"
+          />
+        </div>
         <div className="brand-text">
           <h1>Luxe Nails</h1>
           <span>by Piya</span>

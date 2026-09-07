@@ -90,7 +90,13 @@ export default function LuxeNailsAuth({ onSubmit, onGoogleSignIn, title = 'Welco
       <div className="auth-card">
         <div className="auth-brand">
           <div className="brand-mark brand-mark--large">
-            <span>LN</span>
+            <img
+              src="/assets/ln-logo.jpg"
+              alt="Luxe Nails by Piya"
+              className="brand-img"
+              width="56"
+              height="56"
+            />
           </div>
           <div>
             <p className="brand-title">LUXE NAILS</p>

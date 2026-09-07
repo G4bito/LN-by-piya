@@ -84,25 +84,22 @@ body {
 }
 
 .brand-monogram {
-  width: 42px;
-  height: 42px;
-  border: 1px solid var(--gold);
+  width: 46px;
+  height: 46px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Playfair Display', serif;
-  font-size: 1.1rem;
-  color: var(--gold-light);
-  letter-spacing: 1px;
+  background: #050505;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .brand-img {
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 50%;
 }
 
@@ -717,16 +714,15 @@ body {
 }
 
 .brand-mark--large {
-  width: 50px;
-  height: 50px;
+  width: 56px;
+  height: 56px;
   border-radius: 50%;
-  border: 1px solid var(--gold);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Playfair Display', serif;
-  font-weight: 700;
-  color: var(--gold-light);
+  background: #050505;
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .brand-title {
@@ -2676,6 +2672,8 @@ body {
   .gallery { grid-template-columns: 1fr; gap: 0.6rem; }
   .gallery-placeholder-title { font-size: 1rem; }
   .gallery-placeholder-category { font-size: 0.72rem; }
+  .brand-monogram { width: 40px; height: 40px; }
+  .brand-mark--large { width: 48px; height: 48px; }
   .brand-text h1 { font-size: 1rem; letter-spacing: 1.8px; }
   .brand-text span { font-size: 0.55rem; }
   .nav-links button { padding: 0.45rem 0.8rem; font-size: 0.68rem; }

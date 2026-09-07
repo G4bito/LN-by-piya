@@ -1078,7 +1078,14 @@ function AdminPage({
       <aside className={cx('adm-sidebar', mobileNavOpen && 'adm-sidebar--open')}>
         <div className="adm-sidebar-top">
           <div className="adm-brand">
-            <span className="adm-brand-mark">LN</span>
+            <span className="adm-brand-mark">
+              <img
+                src="/assets/ln-logo.jpg"
+                alt="Luxe Nails by Piya"
+                width="44"
+                height="44"
+              />
+            </span>
             {!sidebarCollapsed && (
               <span className="adm-brand-text">
                 Luxe Nails
