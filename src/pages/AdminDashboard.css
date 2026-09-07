@@ -404,11 +404,24 @@
   border: 1px solid var(--line, rgba(201, 168, 118, 0.28));
   border-radius: var(--adm-radius);
   transition: transform 0.2s ease, border-color 0.2s ease;
+  width: 100%;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .adm-stat-card:hover {
   transform: translateY(-3px);
   border-color: rgba(201, 168, 118, 0.45);
+}
+
+.adm-stat-card:focus-visible,
+.adm-calendar-day:focus-visible,
+.adm-nav-item:focus-visible,
+.adm-btn:focus-visible,
+.adm-icon-btn:focus-visible {
+  outline: 2px solid var(--gold-light, #e9d4a8);
+  outline-offset: 2px;
 }
 
 .adm-stat-icon {
@@ -933,6 +946,35 @@
   gap: 0.6rem;
 }
 
+.adm-appointment-tools {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(130px, 0.8fr));
+  align-items: end;
+  gap: 0.75rem;
+  margin: 1.25rem 0 0.25rem;
+}
+
+.adm-inline-field {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--gold-deep, #9c7b3f);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.adm-inline-field input,
+.adm-inline-field select {
+  min-width: 0;
+  width: 100%;
+  padding: 0.62rem 0.7rem;
+  border: 1px solid var(--line, rgba(201, 168, 118, 0.28));
+  border-radius: var(--adm-radius-sm);
+  background: #0f0d0d;
+  color: var(--cream, #f4ead9);
+  font: inherit;
+}
+
 .adm-filter-chip {
   border: 1px solid var(--line, rgba(201, 168, 118, 0.28));
   background: transparent;
@@ -1060,6 +1102,13 @@
   flex-wrap: wrap;
 }
 
+.adm-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.4rem;
+}
+
 .adm-user-cell {
   display: flex;
   align-items: center;
@@ -1097,6 +1146,81 @@
   width: 56px;
   height: 56px;
   font-size: 1.05rem;
+}
+
+.adm-customer-cards {
+  display: none;
+}
+
+.adm-customer-card {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line, rgba(201, 168, 118, 0.28));
+  border-radius: var(--adm-radius-sm);
+  background: var(--bg-card-alt, #17130f);
+}
+
+.adm-customer-card-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.adm-customer-card-stats span {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.adm-customer-card-stats small {
+  color: var(--gold-deep, #9c7b3f);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.adm-customer-card-stats strong {
+  color: var(--cream, #f4ead9);
+  font-size: 0.82rem;
+}
+
+.adm-customer-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.adm-settings-layout {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.adm-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.adm-settings-wide {
+  grid-column: 1 / -1;
+}
+
+.adm-toggle-field {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 42px;
+  color: var(--cream, #f4ead9);
+}
+
+.adm-toggle-field input {
+  accent-color: var(--gold, #c9a876);
+}
+
+.adm-inline-status {
+  color: var(--gold-light, #e9d4a8);
+  font-size: 0.8rem;
 }
 
 /* ============================================================
@@ -1966,6 +2090,18 @@
   .adm-work-grid {
     grid-template-columns: 1fr;
   }
+
+  .adm-appointment-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .adm-customer-table-wrap {
+    display: none;
+  }
+
+  .adm-customer-cards {
+    display: grid;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1979,6 +2115,24 @@
 
   .adm-stat-grid {
     grid-template-columns: 1fr;
+  }
+
+  .adm-appointment-tools,
+  .adm-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .adm-settings-wide {
+    grid-column: auto;
+  }
+
+  .adm-table-wrap {
+    display: none;
+  }
+
+  .adm-customer-cards {
+    display: grid;
+    gap: 0.75rem;
   }
 
   .adm-calendar-grid {

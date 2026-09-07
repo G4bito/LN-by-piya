@@ -970,7 +970,7 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.2rem;
-  align-items: stretch;
+  align-items: start;
 }
 
 .profile-card,
@@ -991,7 +991,7 @@ body {
 .profile-upcoming-card,
 .profile-loyalty-card,
 .profile-preferences-card {
-  height: 100%;
+  height: auto;
 }
 
 .profile-intro {
@@ -1394,6 +1394,155 @@ body {
   color: #ffe8a3;
   font-size: 0.78rem;
   line-height: 1.5;
+}
+
+.profile-available-rewards {
+  margin: 0.9rem 0 0;
+  color: var(--gold-light);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.profile-view-all-rewards {
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gold-light);
+  font-family: 'Montserrat', sans-serif;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.profile-view-all-rewards:hover,
+.profile-view-all-rewards:focus-visible {
+  color: var(--cream);
+}
+
+.profile-all-rewards-card {
+  grid-column: 1 / -1;
+  order: 4;
+  height: auto !important;
+}
+
+.profile-all-rewards-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.profile-all-rewards-heading .profile-intro {
+  margin-bottom: 0;
+}
+
+.profile-reward-preview-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 0.8rem;
+}
+
+.profile-reward-preview {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: rgba(15, 13, 13, 0.5);
+}
+
+.profile-reward-preview.is-available {
+  border-color: rgba(233, 212, 168, 0.58);
+  background: linear-gradient(135deg, rgba(201, 168, 118, 0.12), rgba(15, 13, 13, 0.5));
+}
+
+.profile-reward-preview h4 {
+  margin: 0.5rem 0 0;
+  color: var(--gold-light);
+  font-family: 'Playfair Display', serif;
+  font-size: 0.98rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.profile-reward-preview p {
+  margin: 0.45rem 0 0;
+  color: rgba(244, 234, 217, 0.68);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.profile-rewards-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  overflow: hidden;
+  pointer-events: auto;
+  background: rgba(5, 4, 4, 0.86);
+  backdrop-filter: blur(4px);
+}
+
+.profile-rewards-dialog {
+  width: min(680px, 100%);
+  height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #14100f;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
+.profile-rewards-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.35rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.profile-rewards-dialog-header h2 {
+  margin: 0.25rem 0 0;
+  color: var(--gold-light);
+  font-family: 'Playfair Display', serif;
+  text-transform: uppercase;
+}
+
+.profile-rewards-dialog-close {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--cream);
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.profile-rewards-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0 1.35rem 1.35rem;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+}
+
+.profile-rewards-dialog-body .profile-reward-milestone {
+  padding: 1.15rem 0;
 }
 
 .profile-rewards-earned {
@@ -3438,7 +3587,7 @@ body {
 
 .home-section-block,
 #home-services,
-#business-information {
+#contact {
   scroll-margin-top: 95px;
 }
 
@@ -3644,6 +3793,13 @@ body {
   text-align: center;
 }
 
+.home-business-heading > p {
+  max-width: 620px;
+  margin: 0.75rem auto 0;
+  color: rgba(244, 234, 217, 0.72);
+  line-height: 1.65;
+}
+
 .home-business-content {
   display: flex;
   align-items: flex-end;
@@ -3706,6 +3862,40 @@ body {
   text-decoration: none;
 }
 
+.home-contact-support {
+  margin-top: 1.7rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line-soft);
+  text-align: center;
+}
+
+.home-contact-support h3 {
+  margin: 0;
+  color: var(--gold-light);
+  font-family: 'Playfair Display', serif;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.home-contact-support p {
+  max-width: 680px;
+  margin: 0.65rem auto 1rem;
+  color: rgba(244, 234, 217, 0.72);
+  font-size: 0.84rem;
+  line-height: 1.65;
+}
+
+.home-contact-support-button {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  text-decoration: none;
+}
+
+
 .home-footer {
   border-top: 1px solid var(--line);
   background: var(--bg-card);
@@ -3749,7 +3939,8 @@ body {
   gap: 0.65rem 1.1rem;
 }
 
-.home-footer-links button {
+.home-footer-links button,
+.home-footer-links a {
   padding: 0;
   border: 0;
   background: transparent;
@@ -3761,9 +3952,17 @@ body {
   text-transform: uppercase;
 }
 
-.home-footer-links button:hover {
+.home-footer-links button:hover,
+.home-footer-links a:hover,
+.home-footer-socials a:hover {
   color: var(--gold-light);
 }
+
+.home-footer-socials a {
+  cursor: pointer;
+  transition: color 0.2s ease;
+}
+
 
 .home-footer-socials {
   justify-content: flex-end;
@@ -5140,21 +5339,21 @@ body {
 
 .profile-card {
   grid-column: span 6;
-  order: 4;
+  order: 5;
 }
 
 .profile-preferences-card {
   grid-column: span 6;
-  order: 5;
+  order: 6;
 }
 
 .history-card {
   grid-column: 1 / -1;
-  order: 6;
+  order: 7;
 }
 
 .profile-grid > .card {
-  height: 100%;
+  height: auto;
   padding: 1.45rem;
 }
 
@@ -5328,6 +5527,7 @@ body {
   .profile-upcoming-card,
   .profile-loyalty-card,
   .profile-card,
+  .profile-all-rewards-card,
   .profile-preferences-card,
   .history-card {
     grid-column: 1 / -1;
@@ -5408,6 +5608,23 @@ body {
   .profile-loyalty-card .profile-metric strong {
     max-width: 65%;
     overflow-wrap: anywhere;
+  }
+
+  .profile-all-rewards-heading {
+    flex-direction: column;
+  }
+
+  .profile-reward-preview-list {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-rewards-overlay {
+    padding: 0.65rem;
+  }
+
+  .profile-rewards-dialog {
+    height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
   }
 }
 

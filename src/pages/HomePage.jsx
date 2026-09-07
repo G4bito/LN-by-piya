@@ -25,10 +25,13 @@ const DEFAULT_BUSINESS_INFO = {
   location: import.meta.env.VITE_BUSINESS_LOCATION || '',
   hours: import.meta.env.VITE_BUSINESS_HOURS || '',
   phone: import.meta.env.VITE_BUSINESS_PHONE || '',
+  email: import.meta.env.VITE_BUSINESS_EMAIL || '',
   facebookUrl: import.meta.env.VITE_BUSINESS_FACEBOOK_URL || '',
   instagramUrl: import.meta.env.VITE_BUSINESS_INSTAGRAM_URL || '',
   directionsUrl: import.meta.env.VITE_BUSINESS_DIRECTIONS_URL || '',
 };
+
+const FACEBOOK_URL = 'https://www.facebook.com/profile.php?id=61591761689777';
 
 function sortServicesByIds(ids) {
   return ids
@@ -54,13 +57,15 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
     review && (review.comment || review.message || review.review || review.reviewText)
   )).slice(0, 3);
   const business = { ...DEFAULT_BUSINESS_INFO, ...(businessInfo || {}) };
+  const facebookUrl = business.facebookUrl || FACEBOOK_URL;
   const businessDetails = [
     { label: 'Location', value: business.location },
     { label: 'Business hours', value: business.hours },
     { label: 'Contact number', value: business.phone },
+    { label: 'Email', value: business.email },
   ].filter((detail) => detail.value);
   const socialLinks = [
-    { label: 'Facebook', value: business.facebookUrl },
+    { label: 'Facebook', value: facebookUrl },
     { label: 'Instagram', value: business.instagramUrl },
   ].filter((link) => link.value);
 
@@ -68,8 +73,9 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
     document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
+
   return (
-    <div className="home-page">
+    <div id="top" className="home-page">
       <header className="hero home-hero">
         <LuxeDynamicBackground />
         <div className="hero-content">
@@ -183,10 +189,11 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
           <button type="button" className="btn-primary" onClick={() => onBookService?.()}>Book Appointment</button>
         </section>
 
-        <section id="business-information" className="card home-business-card" aria-labelledby="business-title">
+        <section id="contact" className="card home-business-card" aria-labelledby="business-title">
           <div className="home-business-heading">
             <span className="eyebrow">Plan your visit</span>
-            <h2 id="business-title">Visit Luxe Nails by Piya</h2>
+            <h2 id="business-title">Contact us</h2>
+            <p>Have a question or want to book your next nail appointment? Get in touch with Luxe Nails by Piya.</p>
           </div>
           {businessDetails.length || socialLinks.length ? (
             <div className="home-business-content">
@@ -200,7 +207,7 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
                 {socialLinks.map((link) => (
                   <div key={link.label}>
                     <dt>{link.label}</dt>
-                    <dd><a href={link.value} target="_blank" rel="noreferrer">Visit {link.label}</a></dd>
+                    <dd><a href={link.value} target="_blank" rel="noopener noreferrer">Visit {link.label}</a></dd>
                   </div>
                 ))}
               </dl>
@@ -211,10 +218,13 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
               ) : null}
             </div>
           ) : (
-            <div className="home-business-empty">
-              <p>Location, business hours, contact details, and social links have not been published yet.</p>
-            </div>
+            <div className="home-business-empty"><p>Business contact details have not been published yet.</p></div>
           )}
+          <div className="home-contact-support" aria-labelledby="contact-support-title">
+            <h3 id="contact-support-title">Having trouble with our website?</h3>
+            <p>Found a bug or experiencing a problem while using the Luxe Nails website? Please send us a message through our Facebook page and tell us what happened. If possible, include a screenshot so we can check the issue.</p>
+            <a className="btn-primary home-contact-support-button" href={facebookUrl} target="_blank" rel="noopener noreferrer">Message us on Facebook</a>
+          </div>
         </section>
       </section>
 
@@ -225,15 +235,15 @@ function HomePage({ onBookService, onViewPortfolio, works, reviews = [], busines
             <span>Luxury {'\u00b7'} Precision {'\u00b7'} Perfection</span>
           </div>
           <nav className="home-footer-links" aria-label="Footer navigation">
-            <button type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Home</button>
-            <button type="button" onClick={() => scrollToSection('home-services')}>Services</button>
+            <a href="#top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Home</a>
+            <a href="#home-services">Services</a>
             <button type="button" onClick={onViewPortfolio}>Gallery</button>
             <button type="button" onClick={() => onBookService?.()}>Book Appointment</button>
-            <button type="button" onClick={() => scrollToSection('business-information')}>Contact</button>
+            <a href="#contact">Contact</a>
           </nav>
           <div className="home-footer-socials">
-            {business.facebookUrl ? <a href={business.facebookUrl} target="_blank" rel="noreferrer">Facebook</a> : <span>Facebook</span>}
-            {business.instagramUrl ? <a href={business.instagramUrl} target="_blank" rel="noreferrer">Instagram</a> : <span>Instagram</span>}
+            <a href={facebookUrl} target="_blank" rel="noopener noreferrer">Facebook</a>
+            {business.instagramUrl ? <a href={business.instagramUrl} target="_blank" rel="noopener noreferrer">Instagram</a> : null}
           </div>
           <p>&copy; 2026 Luxe Nails by Piya</p>
         </div>

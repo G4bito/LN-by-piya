@@ -3,10 +3,12 @@ import {
   claimCustomerLoyaltyReward,
   createLoyaltyRewardId,
   listenToBookings,
+  listenToBusinessSettings,
   listenToLoyaltyProgram,
   listenToUsers,
   markBookingSeen,
   saveLoyaltyProgram,
+  saveBusinessSettings,
   syncConfirmedScheduleSlots,
   updateBookingStatus,
 } from '../firebase';
@@ -71,6 +73,7 @@ const icons = {
   mail: <><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M22 6l-10 7L2 6" /></>,
   phone: <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />,
   gift: <><path d="M20 12v10H4V12" /><path d="M2 7h20v5H2z" /><path d="M12 22V7" /><path d="M12 7H7.5A2.5 2.5 0 1 1 10 4.5C10 7 12 7 12 7z" /><path d="M12 7h4.5A2.5 2.5 0 1 0 14 4.5C14 7 12 7 12 7z" /></>,
+  settings: <><path d="M12 3v2" /><path d="M12 19v2" /><path d="M3 12h2" /><path d="M19 12h2" /><path d="M5.64 5.64l1.41 1.41" /><path d="M16.95 16.95l1.41 1.41" /><path d="M5.64 18.36l1.41-1.41" /><path d="M16.95 7.05l1.41-1.41" /><circle cx="12" cy="12" r="4" /></>,
 };
 
 const I = (name, size, sw) => <Icon path={icons[name]} size={size} strokeWidth={sw} />;
@@ -236,6 +239,24 @@ const PORTFOLIO_STYLE_OPTIONS = ['French Tips', 'French Ombre', 'Ombre', 'Chrome
 const NAIL_SHAPE_OPTIONS = ['Round', 'Oval', 'Almond', 'Square', 'Coffin', 'Stiletto'];
 const NAIL_LENGTH_OPTIONS = ['Short', 'Medium', 'Long', 'Extra Long'];
 const NAIL_FINISH_OPTIONS = ['Glossy', 'Matte', 'Chrome', 'Glitter', 'Cat Eye'];
+const DEFAULT_BUSINESS_SETTINGS = {
+  businessName: 'Luxe Nails by Piya',
+  phone: '',
+  email: '',
+  address: '',
+  facebookUrl: '',
+  instagramUrl: '',
+  businessHours: '',
+  timezone: 'Asia/Manila',
+  bookingInterval: 30,
+  minimumNoticeHours: 2,
+  maximumAdvanceDays: 60,
+  cancellationPolicy: '',
+  lateArrivalPolicy: '',
+  nailArtPricePerNail: NAIL_ART_ADD_ON.pricePerNail,
+  reminder24hEnabled: true,
+  reminder12hEnabled: true,
+};
 
 function buildPortfolioOptions(defaultOptions, works, field, currentValue) {
   const options = new Set(defaultOptions);
@@ -270,6 +291,10 @@ function AdminPage({
   const [loading, setLoading] = useState(true);
   const [bookingStatusFilter, setBookingStatusFilter] = useState('All');
   const [selectedAppointmentDate, setSelectedAppointmentDate] = useState('');
+  const [appointmentSearch, setAppointmentSearch] = useState('');
+  const [appointmentFromDate, setAppointmentFromDate] = useState('');
+  const [appointmentToDate, setAppointmentToDate] = useState('');
+  const [appointmentSort, setAppointmentSort] = useState('nearest');
   const [statusUpdatingId, setStatusUpdatingId] = useState('');
   const [bookingActionError, setBookingActionError] = useState('');
   const [referencePreviewUrl, setReferencePreviewUrl] = useState('');
@@ -319,6 +344,10 @@ function AdminPage({
   const [loyaltySaveStatus, setLoyaltySaveStatus] = useState('');
   const [claimingRewardUserId, setClaimingRewardUserId] = useState('');
   const [rewardActionStatus, setRewardActionStatus] = useState('');
+  const [businessSettings, setBusinessSettings] = useState(DEFAULT_BUSINESS_SETTINGS);
+  const [settingsDraft, setSettingsDraft] = useState(DEFAULT_BUSINESS_SETTINGS);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsStatus, setSettingsStatus] = useState('');
   const rewardClaimInFlightRef = useRef(false);
 
   useEffect(() => {
@@ -337,6 +366,16 @@ function AdminPage({
     );
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'settings') return undefined;
+    const unsubscribe = listenToBusinessSettings((settings) => {
+      const nextSettings = { ...DEFAULT_BUSINESS_SETTINGS, ...(settings || {}) };
+      setBusinessSettings(nextSettings);
+      setSettingsDraft(nextSettings);
+    }, () => setSettingsStatus('Business settings could not be loaded. Check the Firebase rules and retry.'));
+    return () => unsubscribe();
+  }, [activeTab]);
 
   useEffect(() => {
     if (usersProp) return undefined;
@@ -503,12 +542,27 @@ function AdminPage({
   }, [visibleBookings]);
 
   const appointmentConflicts = useMemo(() => findAppointmentConflicts(visibleBookings), [visibleBookings]);
-  const filteredAppointments = useMemo(
-    () => visibleBookings
-      .filter((booking) => matchesAppointmentFilter(booking, bookingStatusFilter, todayKey, selectedAppointmentDate))
-      .sort(compareAppointments),
-    [bookingStatusFilter, selectedAppointmentDate, todayKey, visibleBookings]
-  );
+  const filteredAppointments = useMemo(() => {
+    const term = appointmentSearch.trim().toLowerCase();
+    const filtered = visibleBookings.filter((booking) => {
+      const matchesBaseFilter = matchesAppointmentFilter(booking, bookingStatusFilter, todayKey, selectedAppointmentDate);
+      const matchesSearch = !term || [
+        getBookingCustomerName(booking),
+        getBookingCustomerPhone(booking),
+        booking.email,
+        booking.customerEmail,
+        getBookingServiceLabel(booking),
+      ].some((value) => String(value || '').toLowerCase().includes(term));
+      const matchesFrom = !appointmentFromDate || String(booking.date || '') >= appointmentFromDate;
+      const matchesTo = !appointmentToDate || String(booking.date || '') <= appointmentToDate;
+      return matchesBaseFilter && matchesSearch && matchesFrom && matchesTo;
+    });
+    return filtered.sort((left, right) => {
+      if (appointmentSort === 'newest') return String(right.createdAt || '').localeCompare(String(left.createdAt || ''));
+      if (appointmentSort === 'oldest') return String(left.createdAt || '').localeCompare(String(right.createdAt || ''));
+      return compareAppointments(left, right);
+    });
+  }, [appointmentFromDate, appointmentSearch, appointmentSort, appointmentToDate, bookingStatusFilter, selectedAppointmentDate, todayKey, visibleBookings]);
   const selectedBooking = useMemo(
     () => visibleBookings.find((booking) => booking.id === selectedBookingId) || null,
     [selectedBookingId, visibleBookings]
@@ -612,6 +666,14 @@ function AdminPage({
     setImageFile(null);
   };
 
+  const handleToggleWorkVisibility = async (work) => {
+    try {
+      await onUpdateWork?.(work.id, { visible: work.visible === false });
+    } catch (error) {
+      console.error('Failed to update portfolio visibility:', error);
+    }
+  };
+
   const categoryOptions = useMemo(() => {
     const defaultCategories = ['Gel Manicure', 'BIAB / Structured Gel', 'Soft Gel Extensions'];
     const derived = new Set(defaultCategories);
@@ -706,6 +768,49 @@ function AdminPage({
     setSelectedAppointmentDate(dateKey);
     setBookingStatusFilter('All');
     setActiveTab('bookings');
+  };
+
+  const handleStatCardClick = (label) => {
+    const routes = {
+      'Total customers': 'users',
+      'Upcoming appointments': 'bookings',
+      'Pending requests': 'bookings',
+      'Rewards available': 'rewards',
+      "Today's appointments": 'bookings',
+      '7-day bookings': 'bookings',
+      'Completed visits': 'bookings',
+      'Loyalty members': 'users',
+    };
+    const nextTab = routes[label];
+    if (!nextTab) return;
+    setActiveTab(nextTab);
+    setSelectedAppointmentDate('');
+    if (label === 'Upcoming appointments') setBookingStatusFilter('Upcoming');
+    if (label === 'Pending requests') setBookingStatusFilter('Pending');
+    if (label === "Today's appointments") setBookingStatusFilter('Today');
+  };
+
+  const handleSaveSettings = async (event) => {
+    event.preventDefault();
+    if (settingsSaving) return;
+    setSettingsSaving(true);
+    setSettingsStatus('Saving business settings...');
+    try {
+      const saved = await saveBusinessSettings({
+        ...settingsDraft,
+        bookingInterval: Number(settingsDraft.bookingInterval) || DEFAULT_BUSINESS_SETTINGS.bookingInterval,
+        minimumNoticeHours: Number(settingsDraft.minimumNoticeHours) || 0,
+        maximumAdvanceDays: Number(settingsDraft.maximumAdvanceDays) || DEFAULT_BUSINESS_SETTINGS.maximumAdvanceDays,
+        nailArtPricePerNail: Number(settingsDraft.nailArtPricePerNail) || DEFAULT_BUSINESS_SETTINGS.nailArtPricePerNail,
+      });
+      setBusinessSettings({ ...DEFAULT_BUSINESS_SETTINGS, ...saved });
+      setSettingsDraft({ ...DEFAULT_BUSINESS_SETTINGS, ...saved });
+      setSettingsStatus('Business settings saved.');
+    } catch (error) {
+      setSettingsStatus(error?.message || 'Business settings could not be saved.');
+    } finally {
+      setSettingsSaving(false);
+    }
   };
 
   const handleCancelEdit = () => {
@@ -864,6 +969,25 @@ function AdminPage({
     } catch (error) {
       console.error('Failed to save loyalty reward', error);
       setLoyaltySaveStatus(error?.message || 'The reward milestone could not be saved.');
+    } finally {
+      setLoyaltySaving(false);
+    }
+  };
+
+  const handleToggleReward = async (reward) => {
+    if (loyaltySaving) return;
+    if (reward.active && !window.confirm(`Deactivate "${reward.name}"? Existing customer reward history will be preserved.`)) return;
+    setLoyaltySaving(true);
+    setLoyaltySaveStatus('Updating reward status...');
+    try {
+      const nextRewards = (loyaltyProgram?.rewards || []).map((item) => (
+        item.id === reward.id ? { ...item, active: !item.active } : item
+      ));
+      const savedProgram = await saveLoyaltyProgram({ active: true, enabled: true, rewards: nextRewards });
+      setLoyaltyProgram(savedProgram);
+      setLoyaltySaveStatus(`${reward.name} is now ${reward.active ? 'inactive' : 'active'}.`);
+    } catch (error) {
+      setLoyaltySaveStatus(error?.message || 'The reward status could not be updated.');
     } finally {
       setLoyaltySaving(false);
     }
@@ -1054,13 +1178,13 @@ function AdminPage({
             <>
               <section className="adm-stat-grid">
                 {statCards.map((card) => (
-                  <div key={card.label} className="adm-stat-card">
+                  <button key={card.label} type="button" className="adm-stat-card" onClick={() => handleStatCardClick(card.label)}>
                     <div className="adm-stat-icon">{I(card.icon, 20)}</div>
                     <div>
                       <span className="adm-stat-label">{card.label}</span>
                       <strong className="adm-stat-value">{card.value}</strong>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </section>
 
@@ -1246,11 +1370,15 @@ function AdminPage({
                           <div>
                             <strong>{work.title}</strong>
                             <div className="muted">{work.category}</div>
+                            <span className={cx('adm-badge', work.visible === false ? 'adm-badge--muted' : 'adm-badge--success')}>{work.visible === false ? 'Hidden' : 'Visible'}</span>
                             {work.description ? <p className="adm-work-description">{work.description}</p> : null}
                           </div>
                           <div className="adm-icon-actions">
                             <button className="adm-icon-btn" type="button" onClick={() => handleEditWork(work)} title="Edit item">
                               {I('edit', 15)}
+                            </button>
+                            <button className="adm-icon-btn" type="button" onClick={() => handleToggleWorkVisibility(work)} title={work.visible === false ? 'Show in gallery' : 'Hide from gallery'}>
+                              {I('eye', 15)}
                             </button>
                             <button className="adm-icon-btn" type="button" onClick={() => onMoveWork?.(work.id, 'up')} disabled={works.findIndex((item) => item.id === work.id) === 0} title="Move up">
                               {I('chevronUp', 15)}
@@ -1305,6 +1433,15 @@ function AdminPage({
                   {appointmentConflicts.map((conflict) => `${conflict.appointments.length} appointments on ${formatDate(conflict.date)} at ${formatTime(conflict.time)}`).join(' · ')}
                 </div>
               ) : null}
+              <div className="adm-appointment-tools">
+                <label className="adm-search">
+                  {I('search', 16)}
+                  <input value={appointmentSearch} onChange={(event) => setAppointmentSearch(event.target.value)} placeholder="Search customer, phone, or service" />
+                </label>
+                <label className="adm-inline-field"><span>From</span><input type="date" value={appointmentFromDate} onChange={(event) => setAppointmentFromDate(event.target.value)} /></label>
+                <label className="adm-inline-field"><span>To</span><input type="date" value={appointmentToDate} onChange={(event) => setAppointmentToDate(event.target.value)} /></label>
+                <label className="adm-inline-field"><span>Sort</span><select value={appointmentSort} onChange={(event) => setAppointmentSort(event.target.value)}><option value="nearest">Nearest appointment</option><option value="newest">Newest booking</option><option value="oldest">Oldest booking</option></select></label>
+              </div>
               <section className="adm-panel adm-panel--table">
                 <div className="adm-panel-head">
                   <div>
@@ -1370,6 +1507,17 @@ function AdminPage({
                               </span>
                             </td>
                             <td className="adm-action-cell">
+                              {normalizedStatus === 'Pending Confirmation' ? (
+                                <div className="adm-quick-actions">
+                                  <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => handleBookingAction(booking.id, 'Confirmed')}>Confirm</button>
+                                  <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Decline this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Decline</button>
+                                </div>
+                              ) : normalizedStatus === 'Confirmed' ? (
+                                <div className="adm-quick-actions">
+                                  <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => handleBookingAction(booking.id, 'Completed')}>Complete</button>
+                                  <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Cancel this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Cancel</button>
+                                </div>
+                              ) : null}
                               <button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => handleOpenBooking(booking)}>
                                 View details
                               </button>
@@ -1378,12 +1526,48 @@ function AdminPage({
                           );
                         })}
                       </tbody>
+
                     </table>
                   </div>
                 )}
               </section>
             </>
           )}
+
+          {activeTab === 'settings' && (
+            <form className="adm-settings-layout" onSubmit={handleSaveSettings}>
+              <section className="adm-panel">
+                <div className="adm-panel-head"><h2>Business information</h2><p className="adm-panel-subtitle">One record powers the details used across the customer experience.</p></div>
+                <div className="adm-settings-grid">
+                  {[
+                    ['businessName', 'Business name'], ['phone', 'Phone number'], ['email', 'Email'], ['address', 'Address'],
+                    ['businessHours', 'Business hours'], ['facebookUrl', 'Facebook URL'], ['instagramUrl', 'Instagram URL'],
+                  ].map(([field, label]) => <label className="adm-field" key={field}><span>{label}</span><input value={settingsDraft[field] || ''} onChange={(event) => setSettingsDraft((current) => ({ ...current, [field]: event.target.value }))} /></label>)}
+                </div>
+              </section>
+              <section className="adm-panel">
+                <div className="adm-panel-head"><h2>Booking settings</h2><p className="adm-panel-subtitle">These values are stored centrally for the booking workflow to consume.</p></div>
+                <div className="adm-settings-grid">
+                  <label className="adm-field"><span>Booking interval (minutes)</span><input type="number" min="5" step="5" value={settingsDraft.bookingInterval} onChange={(event) => setSettingsDraft((current) => ({ ...current, bookingInterval: event.target.value }))} /></label>
+                  <label className="adm-field"><span>Minimum booking notice (hours)</span><input type="number" min="0" step="1" value={settingsDraft.minimumNoticeHours} onChange={(event) => setSettingsDraft((current) => ({ ...current, minimumNoticeHours: event.target.value }))} /></label>
+                  <label className="adm-field"><span>Maximum advance booking (days)</span><input type="number" min="1" step="1" value={settingsDraft.maximumAdvanceDays} onChange={(event) => setSettingsDraft((current) => ({ ...current, maximumAdvanceDays: event.target.value }))} /></label>
+                  <label className="adm-field"><span>Business timezone</span><input value={settingsDraft.timezone} onChange={(event) => setSettingsDraft((current) => ({ ...current, timezone: event.target.value }))} /></label>
+                  <label className="adm-field adm-settings-wide"><span>Cancellation policy</span><textarea rows="3" value={settingsDraft.cancellationPolicy} onChange={(event) => setSettingsDraft((current) => ({ ...current, cancellationPolicy: event.target.value }))} /></label>
+                  <label className="adm-field adm-settings-wide"><span>Late arrival policy</span><textarea rows="3" value={settingsDraft.lateArrivalPolicy} onChange={(event) => setSettingsDraft((current) => ({ ...current, lateArrivalPolicy: event.target.value }))} /></label>
+                </div>
+              </section>
+              <section className="adm-panel">
+                <div className="adm-panel-head"><h2>Nail art and reminders</h2><p className="adm-panel-subtitle">Keep the add-on price and reminder preferences visible to the team.</p></div>
+                <div className="adm-settings-grid">
+                  <label className="adm-field"><span>Price per nail (₱)</span><input type="number" min="1" step="1" value={settingsDraft.nailArtPricePerNail} onChange={(event) => setSettingsDraft((current) => ({ ...current, nailArtPricePerNail: event.target.value }))} /></label>
+                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.reminder24hEnabled} onChange={(event) => setSettingsDraft((current) => ({ ...current, reminder24hEnabled: event.target.checked }))} /><span>24-hour reminder</span></label>
+                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.reminder12hEnabled} onChange={(event) => setSettingsDraft((current) => ({ ...current, reminder12hEnabled: event.target.checked }))} /><span>12-hour reminder</span></label>
+                </div>
+                <div className="adm-form-actions"><button className="adm-btn adm-btn--primary" type="submit" disabled={settingsSaving}>{settingsSaving ? 'Saving...' : 'Save settings'}</button>{settingsStatus ? <span className="adm-inline-status" role="status">{settingsStatus}</span> : null}</div>
+              </section>
+            </form>
+          )}
+
 
           {(activeTab === 'users' || activeTab === 'rewards') && (
             <>
@@ -1431,6 +1615,9 @@ function AdminPage({
                         <span className={cx('adm-badge', reward.active ? 'adm-badge--success' : 'adm-badge--muted')}>
                           {reward.active ? 'Active' : 'Inactive'}
                         </span>
+                        <button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => handleToggleReward(reward)} disabled={loyaltySaving}>
+                          {reward.active ? 'Deactivate' : 'Activate'}
+                        </button>
                         <button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => handleEditReward(reward)}>
                           Edit
                         </button>
@@ -1648,7 +1835,7 @@ function AdminPage({
                 </div>
               ) : (
                 <>
-                  <div className="adm-table-wrap">
+                  <div className="adm-table-wrap adm-customer-table-wrap">
                     <table className="adm-table">
                       <thead>
                         <tr>
@@ -1656,7 +1843,6 @@ function AdminPage({
                           <th onClick={() => handleSort('phone')}>Phone number</th>
                           <th>Total visits</th>
                           <th>Rewards</th>
-                          <th>Last visit</th>
                           <th>Next appointment</th>
                           <th onClick={() => handleSort('status')}>Status</th>
                           <th className="adm-th-actions">Details</th>
@@ -1691,7 +1877,6 @@ function AdminPage({
                                 </small>
                               ) : null}
                             </td>
-                            <td>{summary.lastVisit ? formatDate(summary.lastVisit.date) : 'No visits yet'}</td>
                             <td>{summary.nextAppointment ? `${formatDate(summary.nextAppointment.date)} · ${formatTime(summary.nextAppointment.time)}` : 'None scheduled'}</td>
                             <td>
                               <span className={cx('adm-badge', user.status === 'active' ? 'adm-badge--active' : 'adm-badge--inactive')}>
@@ -1711,6 +1896,23 @@ function AdminPage({
                         })}
                       </tbody>
                     </table>
+                  </div>
+
+                  <div className="adm-customer-cards">
+                    {pagedUsers.map((user) => {
+                      const summary = customerSummaryById.get(user.id)
+                        || getCustomerAppointmentSummary(user, visibleBookings, todayKey, loyaltyProgram);
+                      return (
+                        <article className="adm-customer-card" key={user.id}>
+                          <div className="adm-user-cell">
+                            <span className="adm-user-avatar">{initials(user.fullName)}</span>
+                            <span><strong>{user.fullName}</strong><small>{user.email}</small><small>{user.phone || 'No phone saved'}</small></span>
+                          </div>
+                          <div className="adm-customer-card-stats"><span><small>Visits</small><strong>{summary.completedVisits}</strong></span><span><small>Rewards</small><strong>{summary.availableRewards}</strong></span><span><small>Next appointment</small><strong>{summary.nextAppointment ? `${formatDate(summary.nextAppointment.date)} · ${formatTime(summary.nextAppointment.time)}` : 'None scheduled'}</strong></span></div>
+                          <div className="adm-customer-card-footer"><span className={cx('adm-badge', user.status === 'active' ? 'adm-badge--active' : 'adm-badge--inactive')}>{user.status === 'active' ? 'Active' : 'Deactivated'}</span><button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => handleViewUser(user)}>View customer</button></div>
+                        </article>
+                      );
+                    })}
                   </div>
 
                   <div className="adm-pagination">

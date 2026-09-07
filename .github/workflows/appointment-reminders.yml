@@ -39,3 +39,4 @@ jobs:
 
       - name: Process due appointment reminders
         run: node scripts/processAppointmentReminders.js
+

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   getCustomerProfile,
   listenToCustomerLoyalty,
@@ -85,6 +86,8 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
   const [loyaltyLoading, setLoyaltyLoading] = useState(true);
   const [loyaltyError, setLoyaltyError] = useState('');
   const [rewardHistoryOpen, setRewardHistoryOpen] = useState(false);
+  const [allRewardsOpen, setAllRewardsOpen] = useState(false);
+  const rewardModalBodyRef = useRef(null);
 
   const cleanedName = name.trim().replace(/\s+/g, ' ');
   const cleanedPhone = phone.trim().replace(/[^\d]/g, '').slice(0, 11);
@@ -154,6 +157,7 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
     setLoyaltyLoading(true);
     setLoyaltyError('');
     setRewardHistoryOpen(false);
+    setAllRewardsOpen(false);
 
     const unsubscribeProfile = listenToCustomerLoyalty(
       user.uid,
@@ -321,6 +325,12 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
     () => getLoyaltyState(loyaltyProfile, appointmentData.completed.length, loyaltyProgram),
     [appointmentData.completed.length, loyaltyProfile, loyaltyProgram]
   );
+  const rewardPreview = useMemo(() => {
+    const priority = { available: 0, locked: 1, claimed: 2 };
+    return [...loyaltyState.milestones]
+      .sort((left, right) => priority[left.status] - priority[right.status] || left.requiredVisits - right.requiredVisits)
+      .slice(0, 3);
+  }, [loyaltyState.milestones]);
   const nextBookingQuantity = getBookingNailQuantity(appointmentData.next);
   const nextBookingService = SERVICES.find((serviceItem) => serviceItem.id === appointmentData.next?.service);
   const nextBookingNailArt = getBookingNailArt(appointmentData.next, nextBookingService);
@@ -331,6 +341,23 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
     .join('')
     .slice(0, 2)
     .toUpperCase();
+
+  useEffect(() => {
+    if (!allRewardsOpen) return undefined;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.requestAnimationFrame(() => {
+      if (rewardModalBodyRef.current) rewardModalBodyRef.current.scrollTop = 0;
+    });
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setAllRewardsOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [allRewardsOpen]);
 
   return (
     <main className="profile-page">
@@ -540,38 +567,12 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
                   )}
                 </section>
 
-                <section className="profile-reward-milestones" aria-labelledby="reward-milestones-heading">
-                  <div className="profile-reward-milestones-heading">
-                    <span className="profile-reward-kicker" id="reward-milestones-heading">Reward milestones</span>
-                    {loyaltyState.availableRewards > 0 ? (
-                      <small>{loyaltyState.availableRewards} available to use</small>
-                    ) : null}
-                  </div>
-                  <div className="profile-reward-milestone-list">
-                    {loyaltyState.milestones.map((reward) => (
-                      <article className={`profile-reward-milestone is-${reward.status}`} key={reward.id}>
-                        <div className="profile-reward-milestone-top">
-                          <span className="profile-reward-visit-count">{reward.requiredVisits} {reward.requiredVisits === 1 ? 'visit' : 'visits'}</span>
-                          <span className={`profile-reward-status is-${reward.status}`}>{reward.status}</span>
-                        </div>
-                        <h4>{reward.name}</h4>
-                        <p>{reward.description}</p>
-                        {reward.status === 'locked' ? (
-                          <div className="profile-milestone-progress">
-                            <span>{reward.progress} / {reward.requiredVisits} visits</span>
-                            <small>{reward.remainingVisits} more {reward.remainingVisits === 1 ? 'visit' : 'visits'} to unlock</small>
-                          </div>
-                        ) : reward.status === 'available' ? (
-                          <p className="profile-milestone-ready">Reward unlocked · Available to use</p>
-                        ) : (
-                          <p className="profile-milestone-claimed">
-                            Claimed{reward.claimedAt ? ` · ${formatRewardDate(reward.claimedAt)}` : ''}
-                          </p>
-                        )}
-                      </article>
-                    ))}
-                  </div>
-                </section>
+                {loyaltyState.availableRewards > 0 ? (
+                  <p className="profile-available-rewards">{loyaltyState.availableRewards} {loyaltyState.availableRewards === 1 ? 'reward is' : 'rewards are'} available to use.</p>
+                ) : null}
+                <button type="button" className="profile-view-all-rewards" onClick={() => setAllRewardsOpen(true)}>
+                  View all rewards <span aria-hidden="true">→</span>
+                </button>
               </>
             ) : (
               <section className="profile-next-reward" aria-labelledby="next-reward-heading">
@@ -606,6 +607,36 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
               </div>
             ) : null}
           </div>
+
+          <section className="card profile-all-rewards-card" aria-labelledby="your-rewards-heading">
+            <div className="profile-all-rewards-heading">
+              <div>
+                <h3 id="your-rewards-heading">Your rewards</h3>
+                <p className="profile-intro">A quick look at your current reward milestones.</p>
+              </div>
+              <button type="button" className="profile-view-all-rewards" onClick={() => setAllRewardsOpen(true)}>View all rewards <span aria-hidden="true">→</span></button>
+            </div>
+            {loyaltyLoading ? (
+              <p className="profile-reward-empty" role="status">Loading reward milestones...</p>
+            ) : rewardPreview.length > 0 ? (
+              <div className="profile-reward-preview-list">
+                {rewardPreview.map((reward) => (
+                  <article className={`profile-reward-preview is-${reward.status}`} key={reward.id}>
+                    <div className="profile-reward-milestone-top">
+                      <span className="profile-reward-visit-count">{reward.requiredVisits} {reward.requiredVisits === 1 ? 'visit' : 'visits'}</span>
+                      <span className={`profile-reward-status is-${reward.status}`}>{reward.status}</span>
+                    </div>
+                    <h4>{reward.name}</h4>
+                    {reward.status === 'locked' ? <p>{reward.progress} / {reward.requiredVisits} visits · {reward.remainingVisits} remaining</p> : null}
+                    {reward.status === 'available' ? <p className="profile-milestone-ready">Reward unlocked · Available to use</p> : null}
+                    {reward.status === 'claimed' ? <p className="profile-milestone-claimed">Claimed{reward.claimedAt ? ` · ${formatRewardDate(reward.claimedAt)}` : ''}</p> : null}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="profile-empty-state"><p className="muted">No rewards available yet. New loyalty rewards will appear here when available.</p></div>
+            )}
+          </section>
 
           <div className="card profile-preferences-card">
             <h3>Nail preferences</h3>
@@ -758,6 +789,31 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
           </div>
         </div>
       </section>
+
+      {allRewardsOpen && typeof document !== 'undefined' ? createPortal((
+        <div className="profile-rewards-overlay" role="dialog" aria-modal="true" aria-labelledby="all-rewards-heading" onClick={() => setAllRewardsOpen(false)}>
+          <section className="profile-rewards-dialog" onClick={(event) => event.stopPropagation()}>
+            <header className="profile-rewards-dialog-header">
+              <div><span className="profile-reward-kicker">Reward milestones</span><h2 id="all-rewards-heading">All rewards</h2></div>
+              <button type="button" className="profile-rewards-dialog-close" onClick={() => setAllRewardsOpen(false)} aria-label="Close all rewards">×</button>
+            </header>
+            <div ref={rewardModalBodyRef} className="profile-rewards-dialog-body">
+              {!loyaltyState.program.active || loyaltyState.milestones.length === 0 ? (
+                <div className="profile-empty-state"><strong>No rewards available yet</strong><p className="muted">New loyalty rewards will appear here when available.</p></div>
+              ) : loyaltyState.milestones.map((reward) => (
+                <article className={`profile-reward-milestone is-${reward.status}`} key={reward.id}>
+                  <div className="profile-reward-milestone-top"><span className="profile-reward-visit-count">{reward.requiredVisits} {reward.requiredVisits === 1 ? 'visit' : 'visits'}</span><span className={`profile-reward-status is-${reward.status}`}>{reward.status}</span></div>
+                  <h4>{reward.name}</h4>
+                  <p>{reward.description}</p>
+                  {reward.status === 'locked' ? <div className="profile-milestone-progress"><span>{reward.progress} / {reward.requiredVisits} visits</span><small>{reward.remainingVisits} more {reward.remainingVisits === 1 ? 'visit' : 'visits'} to unlock</small></div> : null}
+                  {reward.status === 'available' ? <p className="profile-milestone-ready">Reward unlocked · Available to use</p> : null}
+                  {reward.status === 'claimed' ? <p className="profile-milestone-claimed">Claimed{reward.claimedAt ? ` · ${formatRewardDate(reward.claimedAt)}` : ''}</p> : null}
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+      ), document.body) : null}
     </main>
   );
 }

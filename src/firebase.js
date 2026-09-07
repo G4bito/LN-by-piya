@@ -616,6 +616,8 @@ function sanitizePortfolioItem(item) {
     if (value) sanitized[field] = value;
   });
 
+  sanitized.visible = item?.visible !== false;
+
   return sanitized;
 }
 
@@ -655,7 +657,7 @@ export async function deletePortfolioItem(id) {
   return true;
 }
 
-export function listenToPortfolio(callback, errorCallback) {
+export function listenToPortfolio(callback, errorCallback, { includeHidden = false } = {}) {
   if (!isRealtimeDatabaseAvailable()) {
     callback([]);
     return () => {};
@@ -669,6 +671,7 @@ export function listenToPortfolio(callback, errorCallback) {
       const items = [];
       snapshot.forEach((childSnap) => {
         const data = childSnap.val();
+        if (!includeHidden && data?.visible === false) return;
         const position = data?.position != null ? Number(data.position) : Number(new Date(data?.createdAt).getTime() || Date.now());
         items.push({ id: childSnap.key, ...data, position });
       });
@@ -680,6 +683,35 @@ export function listenToPortfolio(callback, errorCallback) {
       if (errorCallback) errorCallback(error);
     }
   );
+}
+
+export function listenToBusinessSettings(callback, errorCallback) {
+  if (!isRealtimeDatabaseAvailable()) {
+    callback({});
+    return () => {};
+  }
+
+  return onValue(
+    ref(rtdb, 'settings/business'),
+    (snapshot) => callback(snapshot.exists() ? snapshot.val() : {}),
+    (error) => {
+      console.warn('Unable to listen for business settings in Realtime Database', error);
+      errorCallback?.(error);
+    }
+  );
+}
+
+export async function saveBusinessSettings(settings) {
+  if (!isRealtimeDatabaseAvailable()) {
+    throw new Error('Realtime Database is not initialized.');
+  }
+
+  const payload = {
+    ...settings,
+    updatedAt: new Date().toISOString(),
+  };
+  await set(ref(rtdb, 'settings/business'), payload);
+  return payload;
 }
 
 export function listenToBookings(callback, errorCallback) {

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import Navbar from './components/Navbar';
-import { subscribeToAuthChanges, logOut, createOrUpdateCustomerRecord, getCustomerProfile, updateUserStatus, getAccountStatus, listenToPortfolio, listenToUserBookings, listenToCustomerNotifications, markCustomerNotificationsRead, addPortfolioItem, updatePortfolioItem, deletePortfolioItem, prepareImageForUpload, uploadImageFile } from './firebase';
+import { subscribeToAuthChanges, logOut, createOrUpdateCustomerRecord, getCustomerProfile, updateUserStatus, getAccountStatus, listenToPortfolio, listenToBusinessSettings, listenToUserBookings, listenToCustomerNotifications, markCustomerNotificationsRead, addPortfolioItem, updatePortfolioItem, deletePortfolioItem, prepareImageForUpload, uploadImageFile } from './firebase';
 import { SERVICES } from './constants/services';
 import { isValidPhoneNumber } from './validation';
 import { createServiceBookingSelection, getBookingNailArt, serviceSupportsNailArt } from './bookingPricing';
@@ -114,6 +114,7 @@ function App() {
   const [currentPage, setCurrentPage] = useState('home');
   const [selectedService, setSelectedService] = useState(null);
   const [works, setWorks] = useState([]);
+  const [businessInfo, setBusinessInfo] = useState({});
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [pendingBooking, setPendingBooking] = useState(false);
@@ -391,9 +392,22 @@ function App() {
           ? 'Firebase denied access to the portfolio. Publish the Realtime Database rules for this project, then reload the page.'
           : 'Unable to sync the portfolio with Realtime Database. Check your connection and Firebase settings.'
       );
-    });
+    }, { includeHidden: isAdmin });
 
     return () => unsubscribe();
+  }, [currentPage, isAdmin]);
+
+  useEffect(() => {
+    if (isAdmin || !['home', 'portfolio'].includes(currentPage)) return undefined;
+    return listenToBusinessSettings((settings) => {
+      setBusinessInfo({
+        ...settings,
+        location: settings?.location || settings?.address || '',
+        hours: settings?.hours || settings?.businessHours || '',
+      });
+    }, (error) => {
+      console.warn('Business settings realtime listener failed:', error);
+    });
   }, [currentPage, isAdmin]);
 
   useEffect(() => {
@@ -678,7 +692,7 @@ function App() {
             onToggleUserStatus={handleToggleUserStatus}
           />
         ) : isSignedIn ? (
-          <HomePage onBookService={goToBooking} onViewPortfolio={goToPortfolio} works={works} />
+          <HomePage onBookService={goToBooking} onViewPortfolio={goToPortfolio} works={works} businessInfo={businessInfo} />
         ) : (
           <Login
             onAuthSuccess={handleAuthSuccess}
@@ -713,7 +727,7 @@ function App() {
             onToggleUserStatus={handleToggleUserStatus}
           />
         ) : (
-          <HomePage onBookService={goToBooking} onViewPortfolio={goToPortfolio} works={works} />
+          <HomePage onBookService={goToBooking} onViewPortfolio={goToPortfolio} works={works} businessInfo={businessInfo} />
         );
     }
   };

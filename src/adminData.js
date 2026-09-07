@@ -31,6 +31,7 @@ export const ADMIN_NAV_ITEMS = Object.freeze([
   Object.freeze({ key: 'bookings', label: 'Appointments', icon: 'calendar' }),
   Object.freeze({ key: 'users', label: 'Customers', icon: 'users' }),
   Object.freeze({ key: 'rewards', label: 'Rewards', icon: 'gift' }),
+  Object.freeze({ key: 'settings', label: 'Settings', icon: 'settings' }),
 ]);
 
 export const ADMIN_PAGE_TITLES = Object.freeze({
@@ -39,6 +40,7 @@ export const ADMIN_PAGE_TITLES = Object.freeze({
   bookings: Object.freeze({ title: 'Appointments', subtitle: "Review today's schedule and recent activity." }),
   users: Object.freeze({ title: 'Customers', subtitle: 'View customer profiles, preferences, loyalty, and appointment history.' }),
   rewards: Object.freeze({ title: 'Loyalty Rewards', subtitle: 'Create, organize, and manage customer reward milestones.' }),
+  settings: Object.freeze({ title: 'Business settings', subtitle: 'Keep the details that shape bookings and customer communication in one place.' }),
 });
 
 export const LOYALTY_REWARD_TARGET = DEFAULT_LOYALTY_REWARDS[0].requiredVisits;
