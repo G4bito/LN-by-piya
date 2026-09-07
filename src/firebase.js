@@ -1,7 +1,7 @@
 // Minimal Firebase helper. Install firebase and add your config.
 // npm install firebase
 
-import { initializeApp } from 'firebase/app';
+import { getApp, getApps, initializeApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
@@ -40,6 +40,28 @@ import {
   isConfirmedScheduleStatus,
 } from './scheduling';
 
+export const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+  passwordResetContinueUrl: import.meta.env.VITE_PASSWORD_RESET_CONTINUE_URL,
+};
+
+const REQUIRED_FIREBASE_ENVIRONMENT = {
+  apiKey: 'VITE_FIREBASE_API_KEY',
+  authDomain: 'VITE_FIREBASE_AUTH_DOMAIN',
+  databaseURL: 'VITE_FIREBASE_DATABASE_URL',
+  projectId: 'VITE_FIREBASE_PROJECT_ID',
+  storageBucket: 'VITE_FIREBASE_STORAGE_BUCKET',
+  messagingSenderId: 'VITE_FIREBASE_MESSAGING_SENDER_ID',
+  appId: 'VITE_FIREBASE_APP_ID',
+};
+
 let app = null;
 let rtdb = null;
 let auth = null;
@@ -65,6 +87,20 @@ function sanitizePhone(value) {
 function sanitizeAddress(value) {
   if (typeof value !== 'string') return '';
   return value.trim();
+}
+
+export function getMissingFirebaseEnvironmentVariables(config = firebaseConfig) {
+  return Object.entries(REQUIRED_FIREBASE_ENVIRONMENT)
+    .filter(([field]) => !String(config?.[field] || '').trim())
+    .map(([, environmentName]) => environmentName);
+}
+
+function getFirebaseAuthenticationUnavailableMessage() {
+  const missingVariables = getMissingFirebaseEnvironmentVariables();
+  if (missingVariables.length > 0) {
+    return `Firebase authentication is not configured. Missing: ${missingVariables.join(', ')}.`;
+  }
+  return 'Firebase authentication failed to initialize. Check the browser console for the Firebase initialization error.';
 }
 
 function sanitizePreference(value, maxLength = 60) {
@@ -161,14 +197,16 @@ function writeStoredProfile(uid, profile) {
   }
 }
 
-export function initFirebase(config) {
-  if (!config) return null;
+export function initFirebase(config = firebaseConfig) {
   if (app) return app;
-  if (!config.databaseURL) {
-    throw new Error('Realtime Database is not configured. Add VITE_FIREBASE_DATABASE_URL to your environment and restart the app.');
+
+  const missingVariables = getMissingFirebaseEnvironmentVariables(config);
+  if (missingVariables.length > 0) {
+    console.error('Firebase initialization skipped. Missing Vite environment variables:', missingVariables);
+    return null;
   }
 
-  app = initializeApp(config);
+  app = getApps().length > 0 ? getApp() : initializeApp(config);
   rtdb = getDatabase(app, config.databaseURL);
   auth = getAuth(app);
   googleProvider = new GoogleAuthProvider();
@@ -177,10 +215,15 @@ export function initFirebase(config) {
 
   if (typeof window !== 'undefined' && import.meta.env.DEV) {
     window.__LuxeFirebaseDebug = {
-      firebaseConfig: {
-        apiKey: config.apiKey || null,
-        projectId: config.projectId || null,
-        databaseURL: config.databaseURL || null,
+      environment: {
+        apiKey: Boolean(config.apiKey),
+        authDomain: Boolean(config.authDomain),
+        databaseURL: Boolean(config.databaseURL),
+        projectId: Boolean(config.projectId),
+        storageBucket: Boolean(config.storageBucket),
+        messagingSenderId: Boolean(config.messagingSenderId),
+        appId: Boolean(config.appId),
+        measurementId: Boolean(config.measurementId),
       },
       runtime: {
         realtime: Boolean(rtdb),
@@ -195,7 +238,7 @@ export function initFirebase(config) {
 
 async function applyPersistence(remember) {
   if (!auth) {
-    throw new Error('Firebase authentication is not configured yet. Add your VITE_FIREBASE_* values to the .env file and restart the app.');
+    throw new Error(getFirebaseAuthenticationUnavailableMessage());
   }
   const persistence = remember ? browserLocalPersistence : browserSessionPersistence;
   await setPersistence(auth, persistence);
@@ -252,7 +295,7 @@ export async function getAccountStatus(uid, email) {
 
 export async function signInWithGoogle(remember = true) {
   if (!auth) {
-    throw new Error('Firebase authentication is not configured yet. Add your VITE_FIREBASE_* values to the .env file and restart the app.');
+    throw new Error(getFirebaseAuthenticationUnavailableMessage());
   }
 
   await applyPersistence(remember);
@@ -277,7 +320,7 @@ export async function signInWithGoogle(remember = true) {
 
 export async function signInWithEmail(email, password, remember = true) {
   if (!auth) {
-    throw new Error('Firebase authentication is not configured yet. Add your VITE_FIREBASE_* values to the .env file and restart the app.');
+    throw new Error(getFirebaseAuthenticationUnavailableMessage());
   }
 
   await applyPersistence(remember);
@@ -297,7 +340,7 @@ export async function signInWithEmail(email, password, remember = true) {
 
 export async function createAccountWithEmail(name, email, password, remember = true) {
   if (!auth) {
-    throw new Error('Firebase authentication is not configured yet. Add your VITE_FIREBASE_* values to the .env file and restart the app.');
+    throw new Error(getFirebaseAuthenticationUnavailableMessage());
   }
 
   await applyPersistence(remember);
