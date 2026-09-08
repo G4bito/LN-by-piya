@@ -1,0 +1,161 @@
+{
+   "checksum": "ecf4f802c16b5a9cde6abca6f2c799e7",
+   "roots": {
+      "bookmark_bar": {
+         "children": [ {
+            "date_added": "13348301640916911",
+            "date_last_used": "0",
+            "guid": "387f001f-a22b-493f-b872-206bad9acf49",
+            "id": "10",
+            "name": "Facebook",
+            "show_icon": false,
+            "source": "sync",
+            "type": "url",
+            "url": "https://www.facebook.com/",
+            "visit_count": 0
+         }, {
+            "date_added": "13348301710646278",
+            "date_last_used": "0",
+            "guid": "963ec22e-bf5d-4d5b-9d43-273e7bef2e02",
+            "id": "11",
+            "name": "Spotify - Web Player: Music for everyone",
+            "show_icon": false,
+            "source": "sync",
+            "type": "url",
+            "url": "https://open.spotify.com/?flow_ctx=314f0357-6ddf-44f1-8137-c64c4fb1cf14%3A1703849676",
+            "visit_count": 0
+         }, {
+            "date_added": "13348302315675705",
+            "date_last_used": "13404471286705547",
+            "guid": "a7f2023d-d338-4065-8ecf-5f772a49f8f9",
+            "id": "12",
+            "name": "(109) WALA KA PA BANG CHAPTER 2, REVIEW OF RELATED LITERATURE AND STUDIES? NO PROBLEM! - YouTube",
+            "show_icon": false,
+            "source": "sync",
+            "type": "url",
+            "url": "https://www.youtube.com/watch?v=COTTpqNMqIY",
+            "visit_count": 1
+         }, {
+            "date_added": "13348303059239378",
+            "date_last_used": "0",
+            "guid": "c8f79a30-15d3-44bb-a55e-2513b448a788",
+            "id": "13",
+            "name": "shopee.ph",
+            "show_icon": false,
+            "source": "sync",
+            "type": "url",
+            "url": "https://shopee.ph/",
+            "visit_count": 0
+         }, {
+            "date_added": "13348642626835398",
+            "date_last_used": "0",
+            "guid": "7d906885-fbe4-48d8-8c33-600111dc2a57",
+            "id": "14",
+            "name": "Google Scholar",
+            "show_icon": false,
+            "source": "sync",
+            "type": "url",
+            "url": "https://scholar.google.com/",
+            "visit_count": 0
+         }, {
+            "date_added": "13348677346578940",
+            "date_last_used": "0",
+            "guid": "e6912a8a-1142-490d-b410-538bbdd4636c",
+            "id": "15",
+            "name": "Home - Google Drive",
+            "show_icon": false,
+            "source": "sync",
+            "type": "url",
+            "url": "https://drive.google.com/drive/u/1/home",
+            "visit_count": 0
+         }, {
+            "date_added": "13350720263833903",
+            "date_last_used": "0",
+            "guid": "18542e78-9827-4518-a3f6-1c2eb35d9c9b",
+            "id": "16",
+            "name": "(234) YouTube",
+            "show_icon": false,
+            "source": "sync",
+            "type": "url",
+            "url": "https://www.youtube.com/",
+            "visit_count": 0
+         }, {
+            "date_added": "13433348481501126",
+            "date_last_used": "0",
+            "guid": "c1b34ff9-8548-42a3-9a0b-51405bbc79f7",
+            "id": "9",
+            "name": "Express VPN",
+            "show_icon": false,
+            "source": "oem_preload",
+            "type": "url",
+            "url": "https://js.redirect.hp.com/jumpstation?bd=expressvpn&c=*&locale=en_us&pf=*&s=*&tp=edge",
+            "visit_count": 0
+         }, {
+            "date_added": "13433348481500904",
+            "date_last_used": "0",
+            "guid": "295b53dc-c7b8-4adc-91da-c4a0443923bd",
+            "id": "8",
+            "name": "McAfee Security",
+            "show_icon": false,
+            "source": "oem_preload",
+            "type": "url",
+            "url": "https://www.mcafee.com/consumer/v/browserfav/hp.html",
+            "visit_count": 0
+         }, {
+            "date_added": "13433348481500202",
+            "date_last_used": "0",
+            "guid": "0cbf33aa-8e9c-42d7-bf15-41115613eb2f",
+            "id": "7",
+            "name": "LastPass password manager",
+            "show_icon": false,
+            "source": "oem_preload",
+            "type": "url",
+            "url": "https://js.redirect.hp.com/jumpstation?bd=lastpass&c=222&locale=*&pf=*&tp=edge&TYPE=3",
+            "visit_count": 0
+         } ],
+         "date_added": "13433348481247757",
+         "date_last_used": "0",
+         "date_modified": "13433348481501126",
+         "guid": "0bc5d13f-2cba-5d74-951f-3f233fe6c908",
+         "id": "1",
+         "name": "Favorites bar",
+         "source": "unknown",
+         "type": "folder"
+      },
+      "other": {
+         "children": [  ],
+         "date_added": "13433348481247757",
+         "date_last_used": "0",
+         "date_modified": "0",
+         "guid": "82b081ec-3dd3-529c-8475-ab6c344590dd",
+         "id": "2",
+         "name": "Other favorites",
+         "source": "unknown",
+         "type": "folder"
+      },
+      "synced": {
+         "children": [  ],
+         "date_added": "13433348481247757",
+         "date_last_used": "0",
+         "date_modified": "0",
+         "guid": "4cf2e351-0e85-532b-bb37-df045d8f8d0f",
+         "id": "3",
+         "name": "Mobile favorites",
+         "source": "unknown",
+         "type": "folder"
+      },
+      "workspaces_v2": {
+         "children": [  ],
+         "date_added": "13433348481247757",
+         "date_last_used": "0",
+         "date_modified": "0",
+         "guid": "75aa6670-344f-549d-b742-660f029506ab",
+         "id": "5",
+         "name": "Workspaces",
+         "source": "unknown",
+         "type": "folder"
+      }
+   },
+   "sync_metadata": "CjEKDgiIgQISCGg2oiegAQAAEgAqGFBvWjdoT1M1WHdObzB0akJWLzNwMUE9PUgDoAYHEq8BCBASqgEKHGRaQnFMWk9zdThBR25RaFAxWldQditHREVVUT0SJDE4NTQyZTc4LTk4MjctNDUxOC1hM2Y2LTFjMmViMzVkOWM5YhgAIAAoADCI+PvK1DE46biGo9QxQOm4hqPUMUocdzFFc1lZUlBNaUk3MFBhc091SGRiYUxmR0RVPVofIh37b1g1Ty81YW9nSFJxbmxXUFl1YmwrUUFWZlJJPWU4+TkzagDCPgJgBRKvAQgPEqoBChx4MG5hdXptYm1keTFyTTdqMzF1QkxMTEVySHc9EiRlNjkxMmE4YS0xMTQyLTQ5MGQtYjQxMC01MzhiYmRkNDYzNmMYACAAKAAwg/j7ytQxOODj8ZvOMUDg4/GbzjFKHG1ocHdFUEJ2ZURmRGpOZ1FGSkdjL2tSQzVCND1aHyId921Fc2lneitYa2RzUU14dFZHeC9ZTGh2TW0rTT1l+pHe22oAwj4CYAUSjgEIBRKJAQocd1JCclpMKzZQQTlhdktnak5QN0pYRExjZnZzPRIkMzY3MGQyNDMtNjUwYS01MmNlLThmZTktZDQxMjIyZDgyNzJiGAAgACgAMNzQ2eynMzit0tnspzNArdLZ7KczShxubXg2NXNRRHZ4SThUZ0VlditBK250dG9TbjQ9ZQAAAABqAMI+AmAAEq8BCA4SqgEKHFhhQTd5bytwT3BUbTNMMUpqekR2K2JHYjNpaz0SJDdkOTA2ODg1LWZiZTQtNDhkOC04YzMzLTYwMDExMWRjMmE1NxgAIAAoADCH+PvK1DE4rePxm84xQK3j8ZvOMUocYVVXUEkvMFdLeEg3ZU1kb2h1aGxpVU1KOWhFPVofIh3uM2RRTTR5ZC8zV05UNTVVWlMzMG56S1J3WkRrPWUGclKoagDCPgJgBRKvAQgMEqoBChw1cWNIM2lBaGhwTGFaWnpMWGF5MHErUVJUcnc9EiRhN2YyMDIzZC1kMzM4LTQwNjUtOGVjZi01Zjc3MmE0OWY4ZjkYACAAKAAwx5umwJwzOPni8ZvOMUD54vGbzjFKHHltT2E3Q0hlZTVSaFFmY0tmVmUzM0NyaC9NYz1aHyIduDZ2Q1YrcmxQSmpydGlBVWN0YVhsb2tmazUrST1ljy9P+WoAwj4CYAUSrgEICxKpAQocdno1RllOL1d0d2xBSk0rSUVVbjNiUldiOCtZPRIkOTYzZWMyMmUtYmY1ZC00ZDViLTlkNDMtMjczZTdiZWYyZTAyGAAgACgAMIX4+8rUMTiS4vGbzjFAkuLxm84xShw3NGdtZDdrQ3poU2VsdUxhVUY0bEJnTURSL2M9Wh4iHHFjRHBOQlFheU1CZkN2Nk41N3NrWTZMUnlNTT1lD2ImeGoAwj4CYAUSjgEIARKJAQoceXhKLzZmdmtlY3I3a3A1RVF6QjR0V0xwZGJFPRIkMTc4OGE1MzItNzI5OS01YzhlLTgwNDQtODZlOTA1NjhlY2Q2GAAgACgAMO78ifvKMTjDgor7yjFAw4KK+8oxShxhUkNXTGdoRjliNUlucUtJRHZ1Si9qdlFrRmM9ZQAAAABqAMI+AmAAEq4BCAoSqQEKHEhHcDNLK01MeGozcFY3K2lTMmFRR3ZCK0Radz0SJDM4N2YwMDFmLWEyMmItNDkzZi1iODcyLTIwNmJhZDlhY2Y0ORgAIAAoADCG+PvK1DE4vuHxm84xQL7h8ZvOMUocSEZMZndEUG0xMFZDMkQyamlEVEp4eWV1RGFZPVoeIhxDZDNyaG9vamdPMHltOXpPdjMwV2picmlTdVU9ZUQI/X1qAMI+AmAFEq8BCA0SqgEKHGpGTmNpRVIwVi9sOGJJWm0zblhQRmhRNnVUWT0SJGM4Zjc5YTMwLTE1ZDMtNDRiYi1hNTVlLTI1MTNiNDQ4YTc4OBgAIAAoADCE+PvK1DE44uHxm84xQOLh8ZvOMUocMnhrTU5mM0ZpN3F5UmFoeENUYkp5UTJ4ZjBVPVofIh3cQjAzcnFnQzFmVW9KeVBodFVQNFBXcjFzVkhRPWV9TrgCagDCPgJgBRKOAQgCEokBChxZY1NUb252RVNQd3FDczRMMmNyVmh2NjhMOTg9EiQ3MWZkYmNkYi05MzQwLTU5NDEtOGZmNy05YTgxYWQzM2RhNTAYACAAKAAw7/yJ+8oxOPSCivvKMUD0gor7yjFKHG9QVmtod0JSYlY2NUtDV1IyK0lPTkhXb091OD1lAAAAAGoAwj4CYAASjgEIAxKJAQocbmpnRHU4OGVDcnZYcDg2cEQ3ZkhHY3FGcDg4PRIkYzI5ODU4ODUtODdlOC01ZmRiLWIyMjEtMTMwMzg0ODM3MTBiGAAgACgAMPT8ifvKMTi8g4r7yjFAvIOK+8oxShx5ek5CMDFjbjU0QTdjUlUwdVQrL1BnbVR0VW89ZQAAAABqAMI+AmAAMAA4AA==",
+   "version": 1
+}

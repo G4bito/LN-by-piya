@@ -1,0 +1,26 @@
+2026-09-08 13:41:21.501: [INFO] CurrentProfilePath: C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test-2\Default
+2026-09-08 13:41:21.501: [INFO] Profiles total count: 1
+2026-09-08 13:41:21.501: [INFO] Profile: name=Profile 1 path=C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test-2\Default lastActive=2026-09-08T13:41:21.466Z
+2026-09-08 13:41:21.501: [INFO] LastUsedProfileDir: C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test-2\Default
+2026-09-08 13:41:21.501: [INFO] MostRecentlyActiveProfile: name=Profile 1 path=C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test-2\Default lastActive=2026-09-08T13:41:21.466Z
+2026-09-08 13:41:21.501: [INFO] OnDoneLoading sync enabled: 0
+2026-09-08 13:41:21.501: [INFO] BookmarkModelLoaded, ids_reassigned: 0
+2026-09-08 13:41:21.501: [INFO] BookmarksLoadDropped droppedNodes=0
+2026-09-08 13:41:21.501: [INFO] BookmarksSnapshot Startup total=3 bar=3 other=0 mobile=0 showBar=0 showBarNTP=1
+2026-09-08 13:41:21.578: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:41:21.758: [INFO] VisibilityChanged: 0
+2026-09-08 13:41:23.278: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:41:23.282: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-09-08 13:41:23.287: [INFO] Primary account changed.
+2026-09-08 13:41:23.287: [INFO] OnPrimaryAccountChanged PrimaryAccountChangeEvent::Type::kSet
+2026-09-08 13:41:23.298: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-09-08 13:41:23.338: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-09-08 13:41:27.668: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-08 13:41:27.669: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-08 13:41:27.669: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-08 13:41:27.669: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-08 13:41:27.669: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-08 13:41:27.670: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-08 13:41:27.670: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-08 13:41:28.047: [INFO] Sync initialization duration: 4570ms
+2026-09-08 13:41:28.231: [INFO] BookmarksSnapshot Shutdown total=10 bar=10 other=0 mobile=0 showBar=0 showBarNTP=1

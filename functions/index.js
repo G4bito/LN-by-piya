@@ -29,6 +29,7 @@ import {
   getReminderClaimDecision,
   getReminderEligibility,
   getReminderRuntimeSettings,
+  getPendingReminderBookingIds,
   isValidTimeZone,
 } from './appointmentReminderCore.js';
 
@@ -841,9 +842,10 @@ async function processReminderBooking(booking, reminderType, now, timeZone, runt
 }
 
 export async function runAppointmentReminderSweep({ now = Date.now() } = {}) {
-  const [settingsSnapshot, snapshot] = await Promise.all([
+  const [settingsSnapshot, snapshot, pendingRequestsSnapshot] = await Promise.all([
     database.ref('settings/business').get(),
     database.ref('bookings').orderByChild('status').equalTo('Confirmed').get(),
+    database.ref('appointmentChangeRequests').orderByChild('status').equalTo('Pending').get(),
   ]);
   const runtimeSettings = getReminderRuntimeSettings(
     settingsSnapshot.exists() ? settingsSnapshot.val() : {},
@@ -852,14 +854,17 @@ export async function runAppointmentReminderSweep({ now = Date.now() } = {}) {
   const { timeZone, reminderTypes } = runtimeSettings;
   const bookings = [];
   snapshot.forEach((child) => bookings.push({ id: child.key, ...(child.val() || {}) }));
-  const counts = { sent: 0, failed: 0, skipped: 0, ignored: 0 };
+  const pendingReminderBookingIds = getPendingReminderBookingIds(
+    pendingRequestsSnapshot.exists() ? pendingRequestsSnapshot.val() : {}
+  );
+  const counts = { sent: 0, failed: 0, skipped: 0, ignored: 0, paused: 0 };
 
   for (let index = 0; index < bookings.length; index += 5) {
     const batch = bookings.slice(index, index + 5);
     const results = await Promise.allSettled(batch.flatMap((booking) => (
-      reminderTypes.map((reminderType) => (
-        processReminderBooking(booking, reminderType, now, timeZone, runtimeSettings)
-      ))
+      reminderTypes.map((reminderType) => pendingReminderBookingIds.has(booking.id)
+        ? Promise.resolve({ status: 'paused', reason: 'pending-appointment-change' })
+        : processReminderBooking(booking, reminderType, now, timeZone, runtimeSettings))
     )));
     results.forEach((result) => {
       if (result.status === 'rejected') {
@@ -877,6 +882,7 @@ export async function runAppointmentReminderSweep({ now = Date.now() } = {}) {
 
   logger.info('Appointment reminder run completed.', {
     confirmedBookings: bookings.length,
+    appointmentsPausedForReview: pendingReminderBookingIds.size,
     timeZone,
     enabledReminderTypes: reminderTypes,
     ...counts,

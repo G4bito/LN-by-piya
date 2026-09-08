@@ -1,0 +1,29 @@
+2026-09-08 13:58:34.469: [INFO] CurrentProfilePath: C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test-9\Default
+2026-09-08 13:58:34.469: [INFO] Profiles total count: 1
+2026-09-08 13:58:34.469: [INFO] Profile: name=Profile 1 path=C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test-9\Default lastActive=null
+2026-09-08 13:58:34.469: [INFO] LastUsedProfileDir: C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test-9\Default
+2026-09-08 13:58:34.469: [INFO] VisibilityChanged: 0
+2026-09-08 13:58:34.504: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:34.505: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:34.507: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:34.508: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:34.510: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:34.511: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:34.512: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:34.513: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:34.514: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:34.515: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:34.550: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-08 13:58:34.550: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-08 13:58:34.551: [INFO] BookmarkNodeAdded, ABU: 0
+2026-09-08 13:58:34.551: [INFO] OnDoneLoading sync enabled: 0
+2026-09-08 13:58:34.551: [INFO] BookmarkModelLoaded, ids_reassigned: 0
+2026-09-08 13:58:34.551: [INFO] BookmarksLoadDropped droppedNodes=0
+2026-09-08 13:58:34.551: [INFO] BookmarksSnapshot Startup total=3 bar=3 other=0 mobile=0 showBar=0 showBarNTP=1
+2026-09-08 13:58:34.646: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:37.301: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:58:37.318: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-09-08 13:58:37.337: [INFO] Primary account changed.
+2026-09-08 13:58:37.337: [INFO] OnPrimaryAccountChanged PrimaryAccountChangeEvent::Type::kSet
+2026-09-08 13:58:37.355: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-09-08 13:58:37.393: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3

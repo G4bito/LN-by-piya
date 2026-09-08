@@ -88,6 +88,7 @@ export function createServiceBookingSelection(service, quantity = 1, options = {
     ...service,
     ...createServicePricingFields(service, quantity, options.nailArt, options.settings),
     referenceImageUrl: options.referenceImageUrl || '',
+    referenceImageFile: options.referenceImageFile || null,
     skipServiceStep: options.skipServiceStep !== false,
   };
 }

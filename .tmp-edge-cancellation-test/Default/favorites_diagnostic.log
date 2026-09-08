@@ -1,0 +1,17 @@
+2026-09-08 13:40:50.753: [INFO] CurrentProfilePath: C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test\Default
+2026-09-08 13:40:50.753: [INFO] Profiles total count: 1
+2026-09-08 13:40:50.753: [INFO] Profile: name=Profile 1 path=C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test\Default lastActive=2026-09-08T13:40:50.706Z
+2026-09-08 13:40:50.753: [INFO] LastUsedProfileDir: C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test\Default
+2026-09-08 13:40:50.753: [INFO] MostRecentlyActiveProfile: name=Profile 1 path=C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test\Default lastActive=2026-09-08T13:40:50.706Z
+2026-09-08 13:40:50.753: [INFO] OnDoneLoading sync enabled: 0
+2026-09-08 13:40:50.753: [INFO] BookmarkModelLoaded, ids_reassigned: 0
+2026-09-08 13:40:50.753: [INFO] BookmarksLoadDropped droppedNodes=0
+2026-09-08 13:40:50.753: [INFO] BookmarksSnapshot Startup total=3 bar=3 other=0 mobile=0 showBar=0 showBarNTP=1
+2026-09-08 13:40:50.757: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:40:51.077: [INFO] VisibilityChanged: 0
+2026-09-08 13:40:54.681: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-09-08 13:40:54.687: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-09-08 13:40:54.692: [INFO] Primary account changed.
+2026-09-08 13:40:54.693: [INFO] OnPrimaryAccountChanged PrimaryAccountChangeEvent::Type::kSet
+2026-09-08 13:40:54.704: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-09-08 13:41:01.572: [INFO] BookmarksSnapshot Shutdown total=3 bar=3 other=0 mobile=0 showBar=0 showBarNTP=1

@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { getImageFileValidationError, uploadImageFile } from '../firebase';
+import { getImageFileValidationError } from '../firebase';
 import { formatFileSize } from '../imageUploadConfig';
 import { formatPeso, NAIL_ART_ADD_ON } from '../constants/services';
 import { normalizeBusinessSettings } from '../businessSettings';
@@ -29,6 +29,7 @@ export default function ServiceDetailsModal({
   initialQuantity = 1,
   initialNailArt,
   initialReferenceImageUrl = '',
+  initialReferenceImageFile = null,
   businessSettings,
 }) {
   const settings = useMemo(() => normalizeBusinessSettings(businessSettings), [businessSettings]);
@@ -44,10 +45,9 @@ export default function ServiceDetailsModal({
   const [baseQuantity, setBaseQuantity] = useState(clampNailQuantity(initialQuantity));
   const [nailArtEnabled, setNailArtEnabled] = useState(initialNailArt?.enabled === true);
   const [nailArtQuantity, setNailArtQuantity] = useState(clampNailQuantity(initialNailArt?.quantity || 1, settings.maximumNailArtQuantity));
-  const [referenceFile, setReferenceFile] = useState(null);
+  const [referenceFile, setReferenceFile] = useState(initialReferenceImageFile);
   const [referenceImageUrl, setReferenceImageUrl] = useState(initialReferenceImageUrl);
   const [previewUrl, setPreviewUrl] = useState(initialReferenceImageUrl);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState('');
   const [isBooking, setIsBooking] = useState(false);
 
@@ -68,18 +68,19 @@ export default function ServiceDetailsModal({
     setBaseQuantity(clampNailQuantity(initialQuantity));
     setNailArtEnabled(serviceSupportsNailArt(service, settings) && initialNailArt?.enabled === true);
     setNailArtQuantity(clampNailQuantity(initialNailArt?.quantity || 1, settings.maximumNailArtQuantity));
-    setReferenceFile(null);
+    const savedReferenceFile = settings.allowReferencePhoto ? initialReferenceImageFile || null : null;
+    setReferenceFile(savedReferenceFile);
     const savedReferenceUrl = settings.allowReferencePhoto ? initialReferenceImageUrl || '' : '';
     setReferenceImageUrl(savedReferenceUrl);
-    setPreviewUrl(savedReferenceUrl);
-    setUploadProgress(0);
+    if (savedReferenceFile) objectUrlRef.current = URL.createObjectURL(savedReferenceFile);
+    setPreviewUrl(objectUrlRef.current || savedReferenceUrl);
     setUploadError('');
     setIsBooking(false);
     if (contentRef.current) {
       contentRef.current.scrollTop = 0;
       contentRef.current.scrollLeft = 0;
     }
-  }, [initialNailArt?.enabled, initialNailArt?.quantity, initialQuantity, initialReferenceImageUrl, service, settings.allowReferencePhoto, settings.maximumNailArtQuantity, settings.nailArtEligibleServiceIds]);
+  }, [initialNailArt?.enabled, initialNailArt?.quantity, initialQuantity, initialReferenceImageFile, initialReferenceImageUrl, service, settings.allowReferencePhoto, settings.maximumNailArtQuantity, settings.nailArtEligibleServiceIds]);
 
   useEffect(() => {
     if (!service) return undefined;
@@ -159,13 +160,11 @@ export default function ServiceDetailsModal({
       setReferenceFile(null);
       setReferenceImageUrl('');
       setPreviewUrl('');
-      setUploadProgress(0);
       setUploadError(validationError);
       return;
     }
 
     setUploadError('');
-    setUploadProgress(0);
     setReferenceFile(file);
     replacePreviewUrl(file);
   };
@@ -176,7 +175,6 @@ export default function ServiceDetailsModal({
     setReferenceFile(null);
     setReferenceImageUrl('');
     setPreviewUrl('');
-    setUploadProgress(0);
     setUploadError('');
   };
 
@@ -186,28 +184,17 @@ export default function ServiceDetailsModal({
     fileInputRef.current?.click();
   };
 
-  const handleBookService = async () => {
+  const handleBookService = () => {
     setIsBooking(true);
     setUploadError('');
-    let savedReferenceUrl = referenceImageUrl;
-
-    if (settings.allowReferencePhoto && referenceFile) {
-      try {
-        savedReferenceUrl = await uploadImageFile(referenceFile, 'booking-references', setUploadProgress);
-      } catch (error) {
-        console.error('Reference image upload failed', error);
-        setUploadError('The reference photo could not be uploaded. Remove it to continue without a photo, or try again.');
-        setIsBooking(false);
-        return;
-      }
-    }
 
     const selection = createServiceBookingSelection(service, baseQuantity, {
       nailArt: {
         enabled: nailArtEnabled,
         quantity: nailArtQuantity,
       },
-      referenceImageUrl: settings.allowReferencePhoto ? savedReferenceUrl : '',
+      referenceImageUrl: settings.allowReferencePhoto ? referenceImageUrl : '',
+      referenceImageFile: settings.allowReferencePhoto ? referenceFile : null,
       settings,
     });
     onBookService?.(selection);
@@ -369,7 +356,7 @@ export default function ServiceDetailsModal({
                   ref={fileInputRef}
                   className="service-reference-input"
                   type="file"
-                  accept="image/jpeg,image/jpg,image/png,image/webp"
+                  accept="image/jpeg,image/png,image/webp"
                   tabIndex="-1"
                   onChange={handleReferenceChange}
                   disabled={isBooking}
@@ -378,7 +365,6 @@ export default function ServiceDetailsModal({
                 {referenceFile ? (
                   <p className="service-selected-file">{referenceFile.name} • {formatFileSize(referenceFile.size)}</p>
                 ) : null}
-                {uploadProgress > 0 && uploadProgress < 100 ? <p className="service-upload-status">Uploading reference photo: {uploadProgress}%</p> : null}
                 {uploadError ? <p className="service-upload-error" role="alert">{uploadError}</p> : null}
               </div> : null}
             </section>
@@ -402,7 +388,7 @@ export default function ServiceDetailsModal({
 
         <footer className="service-details-footer">
           <button type="button" className="btn-primary service-details-book" onClick={handleBookService} disabled={isBooking} aria-busy={isBooking}>
-            {isBooking ? (referenceFile ? 'Uploading Photo...' : 'Preparing Booking...') : 'Book This Service'}
+            {isBooking ? 'Preparing Booking...' : 'Book This Service'}
           </button>
         </footer>
       </section>

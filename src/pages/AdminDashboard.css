@@ -740,6 +740,12 @@
   border-color: var(--gold, #c9a876);
 }
 
+.adm-field input[type='file'] {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .adm-image-preview {
   border-radius: var(--adm-radius-sm);
   overflow: hidden;
@@ -781,11 +787,213 @@
   margin-top: 4px;
 }
 
+.adm-notification-wrap {
+  position: relative;
+}
+
+.adm-notification-bell {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line, rgba(201, 168, 118, 0.28));
+  border-radius: 50%;
+  background: rgba(201, 168, 118, 0.04);
+  color: var(--cream, #f4ead9);
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.adm-notification-bell:hover,
+.adm-notification-bell.is-active {
+  border-color: rgba(233, 212, 168, 0.65);
+  background: rgba(201, 168, 118, 0.12);
+  color: var(--gold-light, #e9d4a8);
+}
+
+.adm-notification-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #0b0a0a;
+  border-radius: 999px;
+  background: #b94d42;
+  color: #fff8ed;
+  font-size: 0.64rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.adm-notification-panel {
+  position: absolute;
+  top: calc(100% + 0.75rem);
+  right: 0;
+  z-index: 90;
+  width: min(390px, calc(100vw - 2rem));
+  max-height: min(72vh, 640px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(201, 168, 118, 0.42);
+  border-radius: 14px;
+  background: rgba(18, 14, 13, 0.99);
+  box-shadow: 0 24px 65px rgba(0, 0, 0, 0.52);
+}
+
+.adm-notification-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.05rem;
+  border-bottom: 1px solid rgba(201, 168, 118, 0.18);
+}
+
+.adm-notification-panel-head strong,
+.adm-notification-panel-head span {
+  display: block;
+}
+
+.adm-notification-panel-head strong {
+  color: var(--gold-light, #e9d4a8);
+  font-family: 'Playfair Display', serif;
+  font-size: 1rem;
+}
+
+.adm-notification-panel-head span {
+  margin-top: 0.18rem;
+  color: rgba(244, 234, 217, 0.58);
+  font-size: 0.7rem;
+}
+
+.adm-notification-panel-head button,
+.adm-notification-view-all {
+  border: 0;
+  background: transparent;
+  color: var(--gold, #c9a876);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.adm-notification-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.adm-notification-item {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 0;
+  border-bottom: 1px solid rgba(201, 168, 118, 0.12);
+  background: transparent;
+  color: var(--cream, #f4ead9);
+  text-align: left;
+  cursor: pointer;
+}
+
+.adm-notification-item:hover,
+.adm-notification-item.is-unread {
+  background: rgba(201, 168, 118, 0.07);
+}
+
+.adm-notification-item.is-read {
+  opacity: 0.72;
+}
+
+.adm-notification-item-icon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(201, 168, 118, 0.28);
+  border-radius: 50%;
+  color: var(--gold-light, #e9d4a8);
+}
+
+.adm-notification-item-copy,
+.adm-notification-item-copy > * {
+  display: block;
+  min-width: 0;
+}
+
+.adm-notification-item-copy strong {
+  color: var(--cream, #f4ead9);
+  font-size: 0.78rem;
+}
+
+.adm-notification-item-copy > span {
+  margin-top: 0.25rem;
+  color: rgba(244, 234, 217, 0.68);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.adm-notification-item-copy small {
+  margin-top: 0.35rem;
+  color: rgba(244, 234, 217, 0.45);
+  font-size: 0.64rem;
+}
+
+.adm-notification-item-copy em {
+  margin-top: 0.35rem;
+  color: var(--gold, #c9a876);
+  font-size: 0.66rem;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.adm-notification-empty {
+  min-height: 130px;
+  margin: 0;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  color: rgba(244, 234, 217, 0.56);
+  font-size: 0.76rem;
+  text-align: center;
+}
+
+.adm-notification-view-all {
+  min-height: 42px;
+  border-top: 1px solid rgba(201, 168, 118, 0.18);
+}
+
 .adm-upload-error {
   margin: 0.5rem 0 0;
   color: #e6c9b7;
   font-size: 0.82rem;
   line-height: 1.45;
+}
+
+.adm-upload-success {
+  margin: 0.5rem 0 0;
+  color: var(--gold-light, #e9d4a8);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.adm-upload-error,
+.adm-upload-success,
+.adm-upload-help,
+.adm-selected-file {
+  overflow-wrap: anywhere;
 }
 
 .adm-upload-help,
@@ -1516,6 +1724,57 @@
   display: flex;
   flex: 0 0 auto;
   gap: 0.5rem;
+}
+
+.adm-request-indicator {
+  display: block;
+  margin-top: 0.4rem;
+  color: #f0c879;
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.adm-detail-card--request {
+  grid-column: 1 / -1;
+  border-color: rgba(201, 168, 118, 0.42);
+  background: rgba(201, 168, 118, 0.055);
+}
+
+.adm-detail-request-reason {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(201, 168, 118, 0.14);
+}
+
+.adm-detail-request-reason span {
+  color: rgba(244, 234, 217, 0.56);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.adm-detail-request-reason p {
+  margin-top: 0.3rem;
+  color: var(--cream, #f4ead9);
+}
+
+.adm-detail-card--request .adm-request-actions {
+  margin-top: 1rem;
+}
+
+.adm-modal-scrim--decision {
+  z-index: 80;
+}
+
+.adm-request-decision-modal {
+  max-width: 520px;
+}
+
+.adm-request-decision-modal .adm-modal-body > p {
+  margin: 0 0 1rem;
+  color: rgba(244, 234, 217, 0.74);
+  line-height: 1.6;
 }
 
 /* ============================================================
@@ -2410,6 +2669,15 @@
 
   .adm-topbar {
     padding: 0.9rem 1rem;
+  }
+
+  .adm-notification-panel {
+    position: fixed;
+    top: 68px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: calc(100dvh - 84px);
   }
 
   .adm-stat-grid {

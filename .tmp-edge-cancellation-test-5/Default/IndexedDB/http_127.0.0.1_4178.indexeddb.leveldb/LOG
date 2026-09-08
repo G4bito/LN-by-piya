@@ -1,0 +1,6 @@
+2026/09/08-21:52:02.961 6994 Creating DB C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test-5\Default\IndexedDB\http_127.0.0.1_4178.indexeddb.leveldb since it was missing.
+2026/09/08-21:52:02.968 6994 Reusing MANIFEST C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test-5\Default\IndexedDB\http_127.0.0.1_4178.indexeddb.leveldb/MANIFEST-000001
+2026/09/08-21:52:04.216 6648 Level-0 table #5: started
+2026/09/08-21:52:04.219 6648 Level-0 table #5: 1313 bytes OK
+2026/09/08-21:52:04.221 6648 Delete type=0 #3
+2026/09/08-21:52:04.223 6648 Manual compaction at level-0 from '\x00\x01\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x02\x00\x00\x00' @ 0 : 0; will stop at (end)

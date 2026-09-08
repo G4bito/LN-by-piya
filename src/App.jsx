@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import Navbar from './components/Navbar';
-import { subscribeToAuthChanges, logOut, createOrUpdateCustomerRecord, getCustomerProfile, updateUserStatus, resolveUserAuthorization, listenToPortfolio, listenToBusinessSettings, listenToUserBookings, listenToCustomerNotifications, markCustomerNotificationsRead, addPortfolioItem, updatePortfolioItem, deletePortfolioItem, uploadImageFile } from './firebase';
+import { subscribeToAuthChanges, logOut, createOrUpdateCustomerRecord, getCustomerProfile, updateUserStatus, resolveUserAuthorization, listenToPortfolio, listenToBusinessSettings, listenToUserBookings, listenToCustomerNotifications, markCustomerNotificationsRead, addPortfolioItem, updatePortfolioItem, deletePortfolioItem, deleteImageFile, uploadImageFile } from './firebase';
 import { SERVICES } from './constants/services';
 import { isValidPhoneNumber } from './validation';
 import { createServiceBookingSelection, getBookingNailArt, serviceSupportsNailArt } from './bookingPricing';
@@ -93,22 +93,52 @@ function playCustomerNotificationSound() {
   }
 }
 
-async function uploadPortfolioImages(file, progressCallback) {
-  const image = await uploadImageFile(file, 'portfolio', (progress) => {
+async function uploadPortfolioImages(file, portfolioId, progressCallback) {
+  const imageUpload = await uploadImageFile(file, 'portfolio', (progress) => {
     progressCallback?.(Math.round(progress * 0.8));
-  });
+  }, { pathSegments: [portfolioId], returnMetadata: true });
 
-  let thumbnail = image;
+  let thumbnailUpload = imageUpload;
   try {
-    thumbnail = await uploadImageFile(file, 'portfolio-thumbnails', (progress) => {
+    thumbnailUpload = await uploadImageFile(file, 'portfolio-thumbnails', (progress) => {
       progressCallback?.(80 + Math.round(progress * 0.2));
-    }, { maxDimension: 720, quality: 0.84 });
+    }, { maxDimension: 720, quality: 0.84, pathSegments: [portfolioId], returnMetadata: true });
   } catch (error) {
     console.warn('Portfolio thumbnail upload failed; using the optimized full image.', error);
     progressCallback?.(100);
   }
 
-  return { image, thumbnail };
+  return {
+    image: imageUpload.url,
+    imageUrl: imageUpload.url,
+    storagePath: imageUpload.storagePath,
+    imageStoragePath: imageUpload.storagePath,
+    imageContentType: imageUpload.contentType,
+    imageSize: imageUpload.size,
+    originalFileName: imageUpload.originalFileName,
+    thumbnail: thumbnailUpload.url,
+    thumbnailUrl: thumbnailUpload.url,
+    thumbnailStoragePath: thumbnailUpload.storagePath,
+    thumbnailContentType: thumbnailUpload.contentType,
+    thumbnailSize: thumbnailUpload.size,
+  };
+}
+
+async function cleanUpUploadedPortfolioImages(item) {
+  const paths = [...new Set([
+    item?.storagePath,
+    item?.imageStoragePath,
+    item?.thumbnailStoragePath,
+  ].filter(Boolean))];
+  const results = await Promise.allSettled(paths.map((path) => deleteImageFile(path)));
+  results.forEach((result, index) => {
+    if (result.status === 'rejected') {
+      console.warn('Unable to clean up an uploaded portfolio image.', {
+        path: paths[index],
+        code: result.reason?.code || 'storage/unknown',
+      });
+    }
+  });
 }
 
 function App() {
@@ -135,6 +165,7 @@ function App() {
   const [appointmentNotifications, setAppointmentNotifications] = useState([]);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [bookingStatusToast, setBookingStatusToast] = useState(null);
+  const [profileNotificationTarget, setProfileNotificationTarget] = useState(null);
 
   const visibleCustomerNotifications = useMemo(() => {
     const notificationsById = new Map();
@@ -179,13 +210,13 @@ function App() {
   const handleAddWork = async (newWork, progressCallback) => {
     const newPosition = works.length > 0 ? Math.max(...works.map((work) => Number(work.position) || 0)) + 1 : 0;
     const itemToSave = { ...newWork, position: newPosition };
+    let uploadedImages = null;
 
     try {
       const file = itemToSave.imageFile;
       if (file instanceof File) {
-        const uploadedImages = await uploadPortfolioImages(file, progressCallback);
-        itemToSave.image = uploadedImages.image;
-        itemToSave.thumbnail = uploadedImages.thumbnail;
+        uploadedImages = await uploadPortfolioImages(file, itemToSave.id, progressCallback);
+        Object.assign(itemToSave, uploadedImages);
       }
       delete itemToSave.imageFile;
       await addPortfolioItem(itemToSave);
@@ -196,38 +227,64 @@ function App() {
       });
     } catch (error) {
       console.error('Failed to add portfolio item:', error);
+      if (uploadedImages) await cleanUpUploadedPortfolioImages(uploadedImages);
       throw error;
     }
   };
 
   const handleDeleteWork = async (id) => {
     try {
-      await deletePortfolioItem(id);
+      const existingWork = works.find((work) => String(work.id) === String(id)) || null;
+      await deletePortfolioItem(id, existingWork);
       setWorks((prevWorks) => prevWorks.filter((work) => work.id !== id));
     } catch (error) {
       console.error('Failed to delete portfolio item:', error);
-      setWorks((prevWorks) => prevWorks.filter((work) => work.id !== id));
+      throw error;
     }
   };
 
   const handleUpdateWork = async (id, updates, progressCallback) => {
+    let uploadedImages = null;
     try {
       const updatesToSave = { ...updates };
+      const existingWork = works.find((work) => String(work.id) === String(id)) || null;
 
       // If there's an imageFile, keep preview in place and upload in background
       const file = updatesToSave.imageFile;
       if (file instanceof File) {
-        const uploadedImages = await uploadPortfolioImages(file, progressCallback);
-        updatesToSave.image = uploadedImages.image;
-        updatesToSave.thumbnail = uploadedImages.thumbnail;
+        uploadedImages = await uploadPortfolioImages(file, id, progressCallback);
+        Object.assign(updatesToSave, uploadedImages);
       }
 
       // no file — normal update
       delete updatesToSave.imageFile;
       await updatePortfolioItem(id, updatesToSave);
       setWorks((prevWorks) => prevWorks.map((work) => (work.id === id ? { ...work, ...updatesToSave } : work)));
+
+      if (uploadedImages && existingWork) {
+        const replacementPaths = new Set([
+          uploadedImages.storagePath,
+          uploadedImages.imageStoragePath,
+          uploadedImages.thumbnailStoragePath,
+        ].filter(Boolean));
+        const oldPaths = [...new Set([
+          existingWork.storagePath,
+          existingWork.imageStoragePath,
+          existingWork.thumbnailStoragePath,
+        ].filter((path) => path && !replacementPaths.has(path)))];
+        const cleanupResults = await Promise.allSettled(oldPaths.map((path) => deleteImageFile(path)));
+        cleanupResults.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            console.warn('The portfolio image was replaced, but the previous stored image could not be deleted.', {
+              path: oldPaths[index],
+              code: result.reason?.code || 'storage/unknown',
+            });
+          }
+        });
+      }
     } catch (error) {
       console.error('Failed to update portfolio item:', error);
+      if (uploadedImages) await cleanUpUploadedPortfolioImages(uploadedImages);
       throw error;
     }
   };
@@ -516,6 +573,7 @@ function App() {
 
   const handleNavigate = (page) => {
     setNotificationOpen(false);
+    setProfileNotificationTarget(null);
     if (isAdmin && page !== 'admin' && page !== 'profile') {
       setCurrentPage('admin');
       return;
@@ -553,9 +611,12 @@ function App() {
     }
   };
 
-  const handleSelectNotification = () => {
+  const handleSelectNotification = (notification = null) => {
     setNotificationOpen(false);
     setBookingStatusToast(null);
+    setProfileNotificationTarget(notification?.bookingId
+      ? { bookingId: notification.bookingId, nonce: Date.now() }
+      : null);
     setCurrentPage('profile');
   };
 
@@ -711,6 +772,7 @@ function App() {
             onBookAgain={handleBookAgain}
             onRescheduleAppointment={handleRescheduleBooking}
             businessSettings={businessInfo}
+            notificationTarget={profileNotificationTarget}
           />
         );
       default:

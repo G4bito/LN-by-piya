@@ -38,18 +38,29 @@ test('Gel Manicure with Nail Art on five nails totals 544 pesos', () => {
 
 test('booking selection preserves customization and reference image fields', () => {
   const gelManicure = SERVICES.find((service) => service.id === 'gel-manicure');
+  const referenceImageFile = { name: 'reference.webp', type: 'image/webp', size: 1024 };
   const selection = createServiceBookingSelection(gelManicure, 1, {
     nailArt: { enabled: true, quantity: 5 },
     referenceImageUrl: 'https://example.com/reference.jpg',
+    referenceImageFile,
   });
 
   assert.equal(selection.id, 'gel-manicure');
   assert.equal(selection.serviceName, 'Gel Manicure');
   assert.equal(selection.referenceImageUrl, 'https://example.com/reference.jpg');
+  assert.equal(selection.referenceImageFile, referenceImageFile);
   assert.equal(selection.nailArt.quantity, 5);
   assert.equal(selection.nailArt.total, 245);
   assert.equal(selection.estimatedTotal, 544);
   assert.equal(selection.skipServiceStep, true);
+});
+
+test('booking reference photos remain optional', () => {
+  const gelManicure = SERVICES.find((service) => service.id === 'gel-manicure');
+  const selection = createServiceBookingSelection(gelManicure);
+
+  assert.equal(selection.referenceImageUrl, '');
+  assert.equal(selection.referenceImageFile, null);
 });
 
 test('eligible services without Nail Art keep only the base price', () => {

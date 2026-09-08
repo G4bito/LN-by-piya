@@ -109,6 +109,19 @@ export function getBookingServiceName(booking) {
   return humanizeServiceName(booking?.serviceName || booking?.serviceTitle || booking?.service);
 }
 
+export function getPendingReminderBookingIds(changeRequests) {
+  const entries = Array.isArray(changeRequests)
+    ? changeRequests
+    : changeRequests && typeof changeRequests === 'object'
+      ? Object.values(changeRequests)
+      : [];
+  return new Set(entries
+    .filter((request) => String(request?.status || '').trim().toLowerCase() === 'pending')
+    .filter((request) => request?.type === 'cancellation' || request?.type === 'reschedule')
+    .map((request) => String(request?.bookingId || '').trim())
+    .filter(Boolean));
+}
+
 export function getReminderEligibility(
   booking,
   reminderType,

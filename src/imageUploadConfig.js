@@ -3,7 +3,6 @@ export const MAX_PORTFOLIO_IMAGE_SIZE = 8 * BYTES_PER_MEGABYTE;
 export const MAX_REFERENCE_PHOTO_SIZE = 5 * BYTES_PER_MEGABYTE;
 export const ALLOWED_IMAGE_TYPES = Object.freeze([
   'image/jpeg',
-  'image/jpg',
   'image/png',
   'image/webp',
 ]);

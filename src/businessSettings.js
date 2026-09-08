@@ -45,6 +45,7 @@ export const DEFAULT_BUSINESS_SETTINGS = Object.freeze({
   appointmentBufferMinutes: 0,
   maximumAppointmentsPerDay: 8,
   allowCustomerCancellation: false,
+  requireAdminApprovalForCancellation: true,
   cancellationDeadlineHours: 12,
   allowCustomerReschedule: false,
   rescheduleDeadlineHours: 12,
@@ -68,7 +69,7 @@ export const BUSINESS_SETTINGS_FIELDS = Object.freeze([
   'businessName', 'phone', 'email', 'address', 'facebookUrl', 'instagramUrl', 'tagline', 'timezone',
   'businessHours', 'onlineBookingHours', 'blackoutDates', 'bookingInterval', 'minimumNoticeHours',
   'maximumAdvanceDays', 'allowSameDayBooking', 'appointmentBufferMinutes', 'maximumAppointmentsPerDay',
-  'allowCustomerCancellation', 'cancellationDeadlineHours', 'allowCustomerReschedule',
+  'allowCustomerCancellation', 'requireAdminApprovalForCancellation', 'cancellationDeadlineHours', 'allowCustomerReschedule',
   'rescheduleDeadlineHours', 'nailArtPricePerNail', 'maximumNailArtQuantity',
   'nailArtEligibleServiceIds', 'allowReferencePhoto', 'cancellationPolicy', 'lateArrivalPolicy',
   'noShowPolicy', 'appointmentPreparationNote', 'reminder24hEnabled', 'reminder12hEnabled',
@@ -152,6 +153,7 @@ export function normalizeBusinessSettings(value = {}) {
     appointmentBufferMinutes: toBoundedNumber(source.appointmentBufferMinutes, DEFAULT_BUSINESS_SETTINGS.appointmentBufferMinutes, 0, 240),
     maximumAppointmentsPerDay: toBoundedNumber(source.maximumAppointmentsPerDay, DEFAULT_BUSINESS_SETTINGS.maximumAppointmentsPerDay, 1, 100),
     allowCustomerCancellation: source.allowCustomerCancellation === true,
+    requireAdminApprovalForCancellation: source.requireAdminApprovalForCancellation !== false,
     cancellationDeadlineHours: toBoundedNumber(source.cancellationDeadlineHours, DEFAULT_BUSINESS_SETTINGS.cancellationDeadlineHours, 0, 720, false),
     allowCustomerReschedule: source.allowCustomerReschedule === true,
     rescheduleDeadlineHours: toBoundedNumber(source.rescheduleDeadlineHours, DEFAULT_BUSINESS_SETTINGS.rescheduleDeadlineHours, 0, 720, false),
@@ -393,7 +395,12 @@ export function canManageAppointmentOnline(booking, action, settingsValue, now =
   const appointmentAt = getAppointmentTimestamp(booking.date, booking.time, settings.timezone);
   if (appointmentAt == null) return { allowed: false, reason: 'The appointment time could not be verified.' };
   if (appointmentAt - now.getTime() < deadlineHours * 60 * 60 * 1000) {
-    return { allowed: false, reason: `This appointment can no longer be ${isCancellation ? 'cancelled' : 'rescheduled'} online.` };
+    return {
+      allowed: false,
+      reason: isCancellation
+        ? 'Online cancellation requests are no longer available for this appointment. Please contact the salon directly.'
+        : 'This appointment can no longer be rescheduled online.',
+    };
   }
   return { allowed: true, reason: '' };
 }

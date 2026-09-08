@@ -8,13 +8,14 @@ service firebase.storage {
 
     function isAdmin() {
       return isSignedIn()
-        && request.auth.uid == "Q9GKmLkfxdVjnOijI3YUbwaTOMF3";
+        && (request.auth.token.admin == true
+          || request.auth.uid == "Q9GKmLkfxdVjnOijI3YUbwaTOMF3");
     }
 
     function isAllowedImageType() {
       return request.resource != null
         && request.resource.contentType != null
-        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
+        && request.resource.contentType.matches('image/(jpeg|png|webp)');
     }
 
     function isValidPortfolioImage() {
@@ -27,19 +28,19 @@ service firebase.storage {
         && request.resource.size <= 5 * 1024 * 1024;
     }
 
-    match /portfolio/{fileName} {
+    match /portfolio/{allPaths=**} {
       allow read: if true;
       allow create, update: if isAdmin() && isValidPortfolioImage();
       allow delete: if isAdmin();
     }
 
-    match /portfolio-thumbnails/{fileName} {
+    match /portfolio-thumbnails/{allPaths=**} {
       allow read: if true;
       allow create, update: if isAdmin() && isValidPortfolioImage();
       allow delete: if isAdmin();
     }
 
-    match /booking-references/{userId}/{fileName} {
+    match /booking-references/{userId}/{allPaths=**} {
       allow read: if isSignedIn()
         && (request.auth.uid == userId || isAdmin());
       allow create, update: if isSignedIn()

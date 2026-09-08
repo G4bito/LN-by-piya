@@ -4424,6 +4424,12 @@ body {
   font-size: 0.72rem;
 }
 
+.history-item.is-notification-target {
+  border-color: rgba(220, 185, 112, 0.78);
+  box-shadow: 0 0 0 2px rgba(201, 168, 118, 0.16);
+  scroll-margin-top: 110px;
+}
+
 .service-upload-help,
 .service-selected-file {
   margin: 0.55rem 0 0;
@@ -6269,6 +6275,170 @@ body {
 .profile-cancel-appointment {
   color: #e3aaa0;
   border-color: rgba(181, 93, 79, 0.45);
+}
+
+.profile-change-request-status {
+  margin: 0.75rem 0;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(201, 168, 118, 0.28);
+  border-radius: 10px;
+  background: rgba(201, 168, 118, 0.055);
+}
+
+.profile-change-request-status strong,
+.profile-change-request-status span {
+  display: block;
+}
+
+.profile-change-request-status strong {
+  color: var(--gold-light);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+}
+
+.profile-change-request-status span {
+  margin-top: 0.28rem;
+  color: rgba(244, 234, 217, 0.66);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.profile-change-request-status.is-declined {
+  border-color: rgba(181, 93, 79, 0.34);
+}
+
+.history-request-status {
+  color: var(--gold) !important;
+}
+
+.profile-request-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(5, 4, 4, 0.88);
+  backdrop-filter: blur(4px);
+}
+
+.profile-request-dialog {
+  width: min(520px, 100%);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  border: 1px solid rgba(201, 168, 118, 0.48);
+  border-radius: 14px;
+  background: #14100f;
+  box-shadow: 0 26px 75px rgba(0, 0, 0, 0.52);
+}
+
+.profile-request-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.2rem 1.25rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.profile-request-dialog-header h2 {
+  margin: 0.25rem 0 0;
+  color: var(--gold-light);
+  font-family: 'Playfair Display', serif;
+  font-size: 1.25rem;
+  text-transform: uppercase;
+}
+
+.profile-request-dialog-body {
+  padding: 1.2rem 1.25rem;
+}
+
+.profile-request-dialog-body > p {
+  margin: 0 0 0.8rem;
+  color: rgba(244, 234, 217, 0.7);
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.profile-request-appointment {
+  display: grid;
+  gap: 0.22rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: rgba(201, 168, 118, 0.045);
+}
+
+.profile-request-appointment strong {
+  color: var(--cream);
+}
+
+.profile-request-appointment span {
+  color: rgba(244, 234, 217, 0.63);
+  font-size: 0.76rem;
+}
+
+.profile-request-reason {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 1rem;
+  color: var(--cream);
+  font-size: 0.78rem;
+}
+
+.profile-request-reason > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.profile-request-reason > span small,
+.profile-request-reason > small {
+  color: rgba(244, 234, 217, 0.48);
+  font-size: 0.66rem;
+}
+
+.profile-request-reason > small {
+  text-align: right;
+}
+
+.profile-request-reason textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.profile-request-note {
+  margin-top: 1rem !important;
+  padding-left: 0.75rem;
+  border-left: 2px solid rgba(201, 168, 118, 0.45);
+}
+
+.profile-request-error {
+  color: #ffb4b4 !important;
+}
+
+.profile-request-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.7rem;
+  padding: 1rem 1.25rem 1.25rem;
+  border-top: 1px solid var(--line-soft);
+}
+
+@media (max-width: 480px) {
+  .profile-request-overlay {
+    padding: 0.65rem;
+  }
+
+  .profile-request-dialog-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .profile-request-dialog-actions button {
+    width: 100%;
+  }
 }
 
 .profile-notifications-card h3 {

@@ -6,9 +6,12 @@ import {
   getImageUploadErrorMessage,
   listenToBookings,
   listenToAppointmentChangeRequests,
+  listenToAdminNotifications,
   listenToLoyaltyProgram,
   listenToUsers,
   markBookingSeen,
+  markAdminNotificationRead,
+  markAllAdminNotificationsRead,
   saveLoyaltyProgram,
   saveBusinessSettings,
   reviewAppointmentChangeRequest,
@@ -138,6 +141,26 @@ function formatTimestamp(createdAt) {
   }
 }
 
+function formatAdminNotificationTime(createdAt, timeZone = 'Asia/Manila') {
+  const timestamp = typeof createdAt === 'number' ? createdAt : Date.parse(createdAt || '');
+  if (!Number.isFinite(timestamp)) return 'Recently';
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (elapsedSeconds < 60) return 'Just now';
+  if (elapsedSeconds < 3600) return `${Math.floor(elapsedSeconds / 60)} min ago`;
+  if (elapsedSeconds < 86400) return `${Math.floor(elapsedSeconds / 3600)} hr ago`;
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(new Date(timestamp));
+  } catch {
+    return formatTimestamp(timestamp);
+  }
+}
+
 function formatDate(value) {
   if (!value) return '—';
   try {
@@ -222,6 +245,41 @@ function getBookingTotal(booking) {
   return Number(booking?.estimatedTotal ?? booking?.totalPrice ?? booking?.baseTotal ?? booking?.basePrice ?? 0) || 0;
 }
 
+function getAdminNotificationContent(notification, bookings, requests) {
+  const booking = bookings.find((item) => item.id === notification?.bookingId);
+  const request = requests.find((item) => item.id === notification?.requestId || item.id === notification?.targetId);
+  const customerName = getBookingCustomerName(booking);
+  if (notification?.type === 'new_booking') {
+    return {
+      title: 'New Booking',
+      message: `${customerName} booked ${getBookingServiceLabel(booking)} for ${formatDate(booking?.date)} at ${formatTime(booking?.time)}.`,
+      action: 'View appointment',
+    };
+  }
+  if (notification?.type === 'cancellation_request') {
+    return {
+      title: 'Cancellation Request',
+      message: `${customerName} requested to cancel ${getBookingServiceLabel(booking)} on ${formatDate(booking?.date)} at ${formatTime(booking?.time)}.`,
+      action: 'Review request',
+    };
+  }
+  if (notification?.type === 'reschedule_request') {
+    const requestedSchedule = request
+      ? ` to ${formatDate(request.requestedDate)} at ${formatTime(request.requestedTime)}`
+      : '';
+    return {
+      title: 'Reschedule Request',
+      message: `${customerName} requested to move ${getBookingServiceLabel(booking)}${requestedSchedule}.`,
+      action: 'Review request',
+    };
+  }
+  return {
+    title: notification?.title || 'Admin update',
+    message: notification?.message || 'An operational update is ready for review.',
+    action: notification?.bookingId ? 'View appointment' : 'View details',
+  };
+}
+
 function getPreferenceRows(user) {
   const preferences = user?.nailPreferences && typeof user.nailPreferences === 'object' ? user.nailPreferences : {};
   return [
@@ -293,8 +351,12 @@ function AdminPage({
   const [bookingActionError, setBookingActionError] = useState('');
   const [appointmentChangeRequests, setAppointmentChangeRequests] = useState([]);
   const [requestUpdatingId, setRequestUpdatingId] = useState('');
+  const [requestReviewDialog, setRequestReviewDialog] = useState(null);
+  const [adminNotifications, setAdminNotifications] = useState([]);
+  const [adminNotificationOpen, setAdminNotificationOpen] = useState(false);
+  const [adminNotificationExpanded, setAdminNotificationExpanded] = useState(false);
+  const [adminNotificationError, setAdminNotificationError] = useState('');
   const [referencePreviewUrl, setReferencePreviewUrl] = useState('');
-  const [unseenCount, setUnseenCount] = useState(0);
   const [notificationBooking, setNotificationBooking] = useState(null);
   const [backendError, setBackendError] = useState('');
   const [notificationVisible, setNotificationVisible] = useState(false);
@@ -306,11 +368,16 @@ function AdminPage({
   const scheduleSignatureRef = useRef(null);
   const previousRequestIdsRef = useRef(new Set());
   const hasLoadedRequestsRef = useRef(false);
+  const adminNotificationRef = useRef(null);
   const adminBookings = bookings;
 
   const visibleBookings = adminBookings;
   const pendingAppointmentRequests = appointmentChangeRequests.filter((request) => request.status === 'Pending');
-  const totalAdminAlerts = unseenCount + pendingAppointmentRequests.filter((request) => request.seenByAdmin === false).length;
+  const pendingRequestByBookingId = useMemo(() => new Map(
+    pendingAppointmentRequests.map((request) => [request.bookingId, request])
+  ), [pendingAppointmentRequests]);
+  const unreadAdminNotificationCount = adminNotifications.filter((notification) => !notification.read).length;
+  const displayedAdminNotifications = adminNotificationExpanded ? adminNotifications : adminNotifications.slice(0, 8);
 
   /* ---------------- portfolio form state (existing logic) ---------------- */
   const [title, setTitle] = useState('');
@@ -326,6 +393,8 @@ function AdminPage({
   const [isSaving, setIsSaving] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState('');
+  const [deletingWorkId, setDeletingWorkId] = useState(null);
   const portfolioFileInputRef = useRef(null);
 
   /* ---------------- user management state ---------------- */
@@ -389,6 +458,33 @@ function AdminPage({
       setBookingActionError('Appointment change requests could not be loaded.');
     }
   ), []);
+
+  useEffect(() => listenToAdminNotifications(
+    (notifications) => {
+      setAdminNotifications(notifications);
+      setAdminNotificationError('');
+    },
+    (error) => {
+      console.warn('Unable to load Admin notifications.', error);
+      setAdminNotificationError('Notifications could not be loaded right now.');
+    }
+  ), []);
+
+  useEffect(() => {
+    if (!adminNotificationOpen) return undefined;
+    const handlePointerDown = (event) => {
+      if (!adminNotificationRef.current?.contains(event.target)) setAdminNotificationOpen(false);
+    };
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setAdminNotificationOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [adminNotificationOpen]);
 
   useEffect(() => {
     const nextSettings = normalizeBusinessSettings(businessSettingsProp);
@@ -469,9 +565,6 @@ function AdminPage({
 
         const filteredData = data;
 
-        const unseen = filteredData.filter((booking) => booking.seenByAdmin === false).length;
-        setUnseenCount(unseen);
-
         if (hasLoadedBookingsRef.current) {
           const prevIds = previousBookingIdsRef.current;
           const newBookings = filteredData.filter((booking) => !prevIds.has(booking.id) && booking.seenByAdmin === false);
@@ -519,8 +612,6 @@ function AdminPage({
       const objectUrl = URL.createObjectURL(imageFile);
       setPreviewSrc(objectUrl);
       return () => URL.revokeObjectURL(objectUrl);
-    } else {
-      setPreviewSrc('');
     }
     return undefined;
   }, [imageFile]);
@@ -564,7 +655,9 @@ function AdminPage({
   const filteredAppointments = useMemo(() => {
     const term = appointmentSearch.trim().toLowerCase();
     const filtered = visibleBookings.filter((booking) => {
-      const matchesBaseFilter = matchesAppointmentFilter(booking, bookingStatusFilter, todayKey, selectedAppointmentDate);
+      const matchesBaseFilter = bookingStatusFilter === 'Cancellation Requests'
+        ? pendingRequestByBookingId.get(booking.id)?.type === 'cancellation'
+        : matchesAppointmentFilter(booking, bookingStatusFilter, todayKey, selectedAppointmentDate);
       const matchesSearch = !term || [
         getBookingCustomerName(booking),
         getBookingCustomerPhone(booking),
@@ -581,11 +674,15 @@ function AdminPage({
       if (appointmentSort === 'oldest') return compareBookingsByCreatedAt(left, right, 'asc');
       return compareAppointments(left, right);
     });
-  }, [appointmentFromDate, appointmentSearch, appointmentSort, appointmentToDate, bookingStatusFilter, selectedAppointmentDate, todayKey, visibleBookings]);
+  }, [appointmentFromDate, appointmentSearch, appointmentSort, appointmentToDate, bookingStatusFilter, pendingRequestByBookingId, selectedAppointmentDate, todayKey, visibleBookings]);
   const selectedBooking = useMemo(
     () => visibleBookings.find((booking) => booking.id === selectedBookingId) || null,
     [selectedBookingId, visibleBookings]
   );
+  const selectedBookingRequest = useMemo(() => appointmentChangeRequests
+    .filter((request) => request.bookingId === selectedBookingId)
+    .sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0))[0] || null,
+  [appointmentChangeRequests, selectedBookingId]);
   const selectedBookingCustomer = useMemo(
     () => localUsers.find((customer) => customer.id === selectedBooking?.uid)
       || localUsers.find((customer) => customer.email && customer.email === selectedBooking?.email)
@@ -621,12 +718,14 @@ function AdminPage({
       setImageFile(null);
       setPreviewSrc('');
       setUploadError(validationError);
+      setUploadSuccess('');
       setUploadProgress(0);
       setIsSaving(false);
       e.target.value = '';
       return;
     }
     setUploadError('');
+    setUploadSuccess('');
     setUploadProgress(0);
     setImageFile(file);
   };
@@ -672,6 +771,8 @@ function AdminPage({
     setIsSaving(true);
     setUploadProgress(0);
     setUploadError('');
+    setUploadSuccess('');
+    const wasEditing = Boolean(editId);
     try {
       if (editId) {
         await onUpdateWork(editId, itemPayload, (p) => setUploadProgress(p));
@@ -679,6 +780,7 @@ function AdminPage({
         await onAddWork(itemPayload, (p) => setUploadProgress(p));
       }
       resetPortfolioForm();
+      setUploadSuccess(wasEditing ? 'Portfolio image updated successfully.' : 'Portfolio image added successfully.');
     } catch (err) {
       console.error('Portfolio save failed:', {
         code: err?.code || 'unknown',
@@ -703,6 +805,25 @@ function AdminPage({
     setFinish(work.finish || '');
     setPreviewSrc(work.image || '');
     setImageFile(null);
+    setUploadError('');
+    setUploadSuccess('');
+  };
+
+  const handleDeletePortfolioWork = async (work) => {
+    if (deletingWorkId != null) return;
+    setDeletingWorkId(work.id);
+    setUploadError('');
+    setUploadSuccess('');
+    try {
+      await onDeleteWork(work.id);
+      if (String(editId) === String(work.id)) resetPortfolioForm();
+      setUploadSuccess('Portfolio image deleted successfully.');
+    } catch (error) {
+      console.error('Portfolio delete failed:', error);
+      setUploadError('The portfolio image could not be deleted. Please try again.');
+    } finally {
+      setDeletingWorkId(null);
+    }
   };
 
   const handleToggleWorkVisibility = async (work) => {
@@ -747,11 +868,17 @@ function AdminPage({
     if (!notificationBooking) return;
     setActiveTab('bookings');
     setNotificationVisible(false);
-    if (notificationBooking.isChangeRequest) return;
+    if (notificationBooking.isChangeRequest) {
+      setBookingStatusFilter(notificationBooking.type === 'cancellation' ? 'Cancellation Requests' : 'All');
+      setSelectedBookingId(notificationBooking.bookingId);
+      await markAdminNotificationRead(notificationBooking.id).catch((error) => {
+        console.warn('Unable to mark the request notification as read.', error);
+      });
+      return;
+    }
     setSelectedBookingId(notificationBooking.id);
     try {
       await markBookingSeen(notificationBooking.id);
-      setUnseenCount((count) => Math.max(0, count - 1));
     } catch (error) {
       console.error('Failed to mark booking seen:', error);
     }
@@ -775,7 +902,6 @@ function AdminPage({
           : booking
       )));
       if (nextStatus !== 'Pending Confirmation') {
-        setUnseenCount((count) => Math.max(0, count - 1));
       }
     } catch (error) {
       console.error(`Failed to update booking status to ${nextStatus}:`, error);
@@ -797,7 +923,6 @@ function AdminPage({
     if (booking.seenByAdmin === false) {
       try {
         await markBookingSeen(booking.id);
-        setUnseenCount((count) => Math.max(0, count - 1));
       } catch (error) {
         console.warn('Unable to mark booking as seen.', error);
       }
@@ -854,19 +979,58 @@ function AdminPage({
     }
   };
 
-  const handleAppointmentRequestDecision = async (request, decision) => {
+  const handleAdminNotificationClick = async (notification) => {
+    if (!notification) return;
+    setAdminNotificationOpen(false);
+    try {
+      await markAdminNotificationRead(notification.id);
+    } catch (error) {
+      console.warn('Unable to mark the Admin notification as read.', error);
+    }
+    if (notification.bookingId) {
+      setActiveTab('bookings');
+      setSelectedAppointmentDate('');
+      setBookingStatusFilter(notification.type === 'cancellation_request' ? 'Cancellation Requests' : 'All');
+      setSelectedBookingId(notification.bookingId);
+      const booking = bookings.find((item) => item.id === notification.bookingId);
+      if (booking?.seenByAdmin === false) {
+        markBookingSeen(booking.id).catch((error) => console.warn('Unable to mark the booking as seen.', error));
+      }
+    }
+  };
+
+  const handleMarkAllAdminNotificationsRead = async () => {
+    const unreadIds = adminNotifications.filter((notification) => !notification.read).map((notification) => notification.id);
+    if (!unreadIds.length) return;
+    try {
+      await markAllAdminNotificationsRead(unreadIds);
+    } catch (error) {
+      console.warn('Unable to mark all Admin notifications as read.', error);
+      setAdminNotificationError('Notifications could not be updated. Please try again.');
+    }
+  };
+
+  const handleAppointmentRequestDecision = async () => {
+    const request = requestReviewDialog?.request;
+    const decision = requestReviewDialog?.decision;
+    if (!request || !decision) return;
     if (requestUpdatingId) return;
     const action = decision === 'Approved' ? 'approve' : 'decline';
-    if (!window.confirm(`${action === 'approve' ? 'Approve' : 'Decline'} this ${request.type} request?`)) return;
     setRequestUpdatingId(request.id);
     setBookingActionError('');
     try {
-      await reviewAppointmentChangeRequest(request.id, decision);
+      await reviewAppointmentChangeRequest(request.id, decision, requestReviewDialog.adminReason || '');
+      setRequestReviewDialog(null);
     } catch (error) {
       setBookingActionError(error?.message || `The ${request.type} request could not be ${action}d.`);
     } finally {
       setRequestUpdatingId('');
     }
+  };
+
+  const openRequestReviewDialog = (request, decision) => {
+    setBookingActionError('');
+    setRequestReviewDialog({ request, decision, adminReason: '' });
   };
 
   const updateSettingsField = (field, value) => {
@@ -1238,15 +1402,50 @@ function AdminPage({
             <p>{ADMIN_PAGE_TITLES[activeTab].subtitle}</p>
           </div>
           <div className="adm-topbar-actions">
-            <button
-              type="button"
-              className={cx('adm-avatar', totalAdminAlerts > 0 && 'adm-avatar--alert')}
-              title={totalAdminAlerts > 0 ? `${totalAdminAlerts} appointment alert${totalAdminAlerts === 1 ? '' : 's'}` : 'Admin'}
-              onClick={() => setActiveTab('bookings')}
-            >
-              AD
-              {totalAdminAlerts > 0 && <span className="adm-avatar-badge">{totalAdminAlerts}</span>}
-            </button>
+            <div className="adm-notification-wrap" ref={adminNotificationRef}>
+              <button
+                type="button"
+                className={cx('adm-notification-bell', adminNotificationOpen && 'is-active')}
+                onClick={() => setAdminNotificationOpen((open) => !open)}
+                aria-label={unreadAdminNotificationCount ? `${unreadAdminNotificationCount} unread Admin notifications` : 'Admin notifications'}
+                aria-expanded={adminNotificationOpen}
+                title="Notifications"
+              >
+                {I('bell', 20)}
+                {unreadAdminNotificationCount > 0 ? <span className="adm-notification-badge">{unreadAdminNotificationCount > 9 ? '9+' : unreadAdminNotificationCount}</span> : null}
+              </button>
+              {adminNotificationOpen ? (
+                <section className="adm-notification-panel" aria-label="Admin notifications">
+                  <header className="adm-notification-panel-head">
+                    <div><strong>Notifications</strong><span>{unreadAdminNotificationCount ? `${unreadAdminNotificationCount} unread` : "You're all caught up."}</span></div>
+                    {unreadAdminNotificationCount ? <button type="button" onClick={handleMarkAllAdminNotificationsRead}>Mark all as read</button> : null}
+                  </header>
+                  <div className="adm-notification-list">
+                    {adminNotificationError ? <p className="adm-notification-empty">{adminNotificationError}</p> : displayedAdminNotifications.length ? displayedAdminNotifications.map((notification) => {
+                      const content = getAdminNotificationContent(notification, bookings, appointmentChangeRequests);
+                      return (
+                        <button
+                          type="button"
+                          className={cx('adm-notification-item', notification.read ? 'is-read' : 'is-unread', notification.handled && 'is-handled')}
+                          key={notification.id}
+                          onClick={() => handleAdminNotificationClick(notification)}
+                        >
+                          <span className="adm-notification-item-icon">{notification.type === 'new_booking' ? I('calendar', 16) : I('bell', 16)}</span>
+                          <span className="adm-notification-item-copy">
+                            <strong>{content.title}</strong>
+                            <span>{content.message}</span>
+                            <small>{formatAdminNotificationTime(notification.createdAt, salonTimeZone)}</small>
+                            <em>{content.action}</em>
+                          </span>
+                        </button>
+                      );
+                    }) : <div className="adm-notification-empty">{I('bell', 22)}<span>No new notifications.</span></div>}
+                  </div>
+                  {adminNotifications.length > 8 ? <button className="adm-notification-view-all" type="button" onClick={() => setAdminNotificationExpanded((expanded) => !expanded)}>{adminNotificationExpanded ? 'Show latest' : 'View all notifications'}</button> : null}
+                </section>
+              ) : null}
+            </div>
+            <button type="button" className="adm-avatar" title="Admin" onClick={() => setActiveTab('bookings')}>AD</button>
           </div>
         </header>
 
@@ -1423,7 +1622,7 @@ function AdminPage({
                     <input
                       ref={portfolioFileInputRef}
                       type="file"
-                      accept="image/jpeg,image/jpg,image/png,image/webp"
+                      accept="image/jpeg,image/png,image/webp"
                       onChange={handleFileChange}
                       disabled={isSaving}
                     />
@@ -1457,6 +1656,7 @@ function AdminPage({
                     </div>
                   )}
                   {uploadError && <p className="adm-upload-error" role="alert">{uploadError}</p>}
+                  {uploadSuccess && <p className="adm-upload-success" role="status">{uploadSuccess}</p>}
                 </form>
               </section>
 
@@ -1495,7 +1695,7 @@ function AdminPage({
                             <button className="adm-icon-btn" type="button" onClick={() => onMoveWork?.(work.id, 'down')} disabled={works.findIndex((item) => item.id === work.id) === works.length - 1} title="Move down">
                               {I('chevronDown', 15)}
                             </button>
-                            <button className="adm-icon-btn adm-icon-btn--danger" type="button" onClick={() => onDeleteWork(work.id)} title="Delete">
+                            <button className="adm-icon-btn adm-icon-btn--danger" type="button" onClick={() => handleDeletePortfolioWork(work)} disabled={deletingWorkId != null} title={deletingWorkId === work.id ? 'Deleting' : 'Delete'}>
                               {I('trash', 15)}
                             </button>
                           </div>
@@ -1530,6 +1730,16 @@ function AdminPage({
                         {filter} · {visibleBookings.filter((booking) => matchesAppointmentFilter(booking, filter, todayKey)).length}
                       </button>
                     ))}
+                    <button
+                      type="button"
+                      className={cx('adm-filter-chip', !selectedAppointmentDate && bookingStatusFilter === 'Cancellation Requests' && 'adm-filter-chip--active')}
+                      onClick={() => {
+                        setSelectedAppointmentDate('');
+                        setBookingStatusFilter('Cancellation Requests');
+                      }}
+                    >
+                      Cancellation Requests {'\u00b7'} {pendingAppointmentRequests.filter((request) => request.type === 'cancellation').length}
+                    </button>
                   </div>
                 </div>
               </section>
@@ -1556,8 +1766,9 @@ function AdminPage({
                             <small>Sent {formatBookingCreatedAt(request.createdAt, salonTimeZone) || 'recently'}</small>
                           </div>
                           <div className="adm-request-actions">
-                            <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={requestUpdatingId === request.id} onClick={() => handleAppointmentRequestDecision(request, 'Approved')}>{requestUpdatingId === request.id ? 'Reviewing...' : 'Approve'}</button>
-                            <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={requestUpdatingId === request.id} onClick={() => handleAppointmentRequestDecision(request, 'Declined')}>Decline</button>
+                            <button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => booking && setSelectedBookingId(booking.id)}>Review</button>
+                            <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={requestUpdatingId === request.id} onClick={() => openRequestReviewDialog(request, 'Approved')}>{requestUpdatingId === request.id ? 'Approving...' : 'Approve'}</button>
+                            <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={requestUpdatingId === request.id} onClick={() => openRequestReviewDialog(request, 'Declined')}>{requestUpdatingId === request.id ? 'Declining...' : 'Decline'}</button>
                           </div>
                         </article>
                       );
@@ -1617,6 +1828,7 @@ function AdminPage({
                           const hasConflict = appointmentConflicts.some((conflict) => (
                             conflict.date === booking.date && conflict.time === booking.time
                           ));
+                          const pendingRequest = pendingRequestByBookingId.get(booking.id);
                           return (
                           <tr key={booking.id} className={selectedBookingId === booking.id ? 'adm-table-row--selected' : ''}>
                             <td>
@@ -1647,6 +1859,7 @@ function AdminPage({
                               )}>
                                 {normalizedStatus}
                               </span>
+                              {pendingRequest ? <small className="adm-request-indicator">{pendingRequest.type === 'cancellation' ? 'Cancellation requested' : 'Reschedule requested'}</small> : null}
                             </td>
                             <td className="adm-action-cell">
                               {normalizedStatus === 'Pending Confirmation' ? (
@@ -1657,7 +1870,7 @@ function AdminPage({
                               ) : normalizedStatus === 'Confirmed' ? (
                                 <div className="adm-quick-actions">
                                   <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => handleBookingAction(booking.id, 'Completed')}>Complete</button>
-                                  <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Cancel this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Cancel</button>
+                                  {pendingRequest?.type === 'cancellation' ? <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" onClick={() => setSelectedBookingId(booking.id)}>Review request</button> : <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Cancel this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Cancel</button>}
                                 </div>
                               ) : null}
                               <button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => handleOpenBooking(booking)}>
@@ -1680,6 +1893,7 @@ function AdminPage({
                       const hasConflict = appointmentConflicts.some((conflict) => (
                         conflict.date === booking.date && conflict.time === booking.time
                       ));
+                      const pendingRequest = pendingRequestByBookingId.get(booking.id);
                       return (
                         <article className="adm-appointment-card" key={booking.id}>
                           <header className="adm-appointment-card-head">
@@ -1707,6 +1921,7 @@ function AdminPage({
                             </div>
                           </div>
                           {getNailArtSummary(booking) ? <small className="adm-booking-customization">{getNailArtSummary(booking)}</small> : null}
+                          {pendingRequest ? <small className="adm-request-indicator">{pendingRequest.type === 'cancellation' ? 'Cancellation requested' : 'Reschedule requested'}</small> : null}
                           {hasConflict ? <small className="adm-conflict-label">Scheduling conflict</small> : null}
                           <footer className="adm-appointment-card-actions">
                             {normalizedStatus === 'Pending Confirmation' ? (
@@ -1717,7 +1932,7 @@ function AdminPage({
                             ) : normalizedStatus === 'Confirmed' ? (
                               <>
                                 <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => handleBookingAction(booking.id, 'Completed')}>Complete</button>
-                                <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Cancel this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Cancel</button>
+                                {pendingRequest?.type === 'cancellation' ? <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" onClick={() => setSelectedBookingId(booking.id)}>Review request</button> : <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Cancel this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Cancel</button>}
                               </>
                             ) : null}
                             <button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => handleOpenBooking(booking)}>View details</button>
@@ -1784,6 +1999,7 @@ function AdminPage({
                   <label className="adm-field"><span>Maximum appointments per day</span><input type="number" min="1" max="100" step="1" value={settingsDraft.maximumAppointmentsPerDay} onChange={(event) => updateSettingsField('maximumAppointmentsPerDay', event.target.value)} /></label>
                   <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.allowSameDayBooking} onChange={(event) => updateSettingsField('allowSameDayBooking', event.target.checked)} /><span>Allow same-day booking</span></label>
                   <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.allowCustomerCancellation} onChange={(event) => updateSettingsField('allowCustomerCancellation', event.target.checked)} /><span>Allow customer cancellation requests online</span></label>
+                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.requireAdminApprovalForCancellation} disabled={!settingsDraft.allowCustomerCancellation} onChange={(event) => updateSettingsField('requireAdminApprovalForCancellation', event.target.checked)} /><span>Require Admin approval for cancellation <small>Recommended: keep this on so the appointment remains confirmed until you decide.</small></span></label>
                   <label className="adm-field"><span>Cancellation deadline (hours)</span><input type="number" min="0" max="720" value={settingsDraft.cancellationDeadlineHours} disabled={!settingsDraft.allowCustomerCancellation} onChange={(event) => updateSettingsField('cancellationDeadlineHours', event.target.value)} /></label>
                   <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.allowCustomerReschedule} onChange={(event) => updateSettingsField('allowCustomerReschedule', event.target.checked)} /><span>Allow customer reschedule requests online</span></label>
                   <label className="adm-field"><span>Reschedule deadline (hours)</span><input type="number" min="0" max="720" value={settingsDraft.rescheduleDeadlineHours} disabled={!settingsDraft.allowCustomerReschedule} onChange={(event) => updateSettingsField('rescheduleDeadlineHours', event.target.value)} /></label>
@@ -2305,6 +2521,24 @@ function AdminPage({
                   <div className="adm-detail-row adm-detail-row--total"><span>Estimated total</span><strong>{formatPeso(getBookingTotal(selectedBooking))}</strong></div>
                 </section>
 
+                {selectedBookingRequest ? (
+                  <section className="adm-detail-card adm-detail-card--request">
+                    <h4>{selectedBookingRequest.type === 'cancellation' ? 'Cancellation request' : 'Reschedule request'}</h4>
+                    <div className="adm-detail-row"><span>Requested</span><strong>{formatBookingCreatedAt(selectedBookingRequest.createdAt, salonTimeZone) || 'Recently'}</strong></div>
+                    <div className="adm-detail-row"><span>Status</span><strong>{selectedBookingRequest.status === 'Pending' ? 'Pending Review' : selectedBookingRequest.status}</strong></div>
+                    {selectedBookingRequest.type === 'reschedule' ? <div className="adm-detail-row"><span>Requested time</span><strong>{formatDate(selectedBookingRequest.requestedDate)} Â· {formatTime(selectedBookingRequest.requestedTime)}</strong></div> : null}
+                    <div className="adm-detail-request-reason"><span>Customer reason</span><p>{selectedBookingRequest.reason || 'No reason provided.'}</p></div>
+                    {selectedBookingRequest.adminReason ? <div className="adm-detail-request-reason"><span>Salon note</span><p>{selectedBookingRequest.adminReason}</p></div> : null}
+                    {selectedBookingRequest.reviewedAt ? <small>Reviewed {formatBookingCreatedAt(selectedBookingRequest.reviewedAt, salonTimeZone)}</small> : null}
+                    {selectedBookingRequest.status === 'Pending' ? (
+                      <div className="adm-request-actions">
+                        <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={requestUpdatingId === selectedBookingRequest.id} onClick={() => openRequestReviewDialog(selectedBookingRequest, 'Approved')}>{requestUpdatingId === selectedBookingRequest.id ? 'Approving...' : selectedBookingRequest.type === 'cancellation' ? 'Approve cancellation' : 'Approve reschedule'}</button>
+                        <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={requestUpdatingId === selectedBookingRequest.id} onClick={() => openRequestReviewDialog(selectedBookingRequest, 'Declined')}>{requestUpdatingId === selectedBookingRequest.id ? 'Declining...' : 'Decline request'}</button>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
                 <section className="adm-detail-card adm-detail-card--reminders">
                   <h4>Reminders</h4>
                   <div className="adm-reminder-row">
@@ -2329,13 +2563,14 @@ function AdminPage({
                     <span>Update appointment</span>
                     <select
                       value={normalizeBookingStatus(selectedBooking.status)}
-                      disabled={statusUpdatingId === selectedBooking.id}
+                      disabled={statusUpdatingId === selectedBooking.id || selectedBookingRequest?.status === 'Pending'}
                       onChange={(event) => handleBookingAction(selectedBooking.id, event.target.value)}
                     >
                       {ADMIN_BOOKING_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
                     </select>
                   </label>
                   {statusUpdatingId === selectedBooking.id ? <p>Saving status…</p> : null}
+                  {selectedBookingRequest?.status === 'Pending' ? <p>Review the pending customer request before changing this appointment status.</p> : null}
                   {selectedBooking.rewardGiven ? <p className="adm-reward-confirmation">Loyalty point awarded for this visit.</p> : null}
                 </section>
               </div>
@@ -2346,6 +2581,39 @@ function AdminPage({
           </div>
         </div>
       )}
+
+      {requestReviewDialog ? (
+        <div className="adm-modal-scrim adm-modal-scrim--decision" onClick={() => !requestUpdatingId && setRequestReviewDialog(null)}>
+          <section className="adm-modal adm-request-decision-modal" role="dialog" aria-modal="true" aria-labelledby="request-decision-title" onClick={(event) => event.stopPropagation()}>
+            <div className="adm-modal-head">
+              <div>
+                <h3 id="request-decision-title">{requestReviewDialog.decision === 'Approved' ? `Approve ${requestReviewDialog.request.type === 'cancellation' ? 'cancellation' : 'reschedule'}?` : `Decline ${requestReviewDialog.request.type} request?`}</h3>
+                <span className="adm-modal-kicker">Confirm your decision before Firebase is updated.</span>
+              </div>
+              <button className="adm-icon-btn" type="button" disabled={Boolean(requestUpdatingId)} onClick={() => setRequestReviewDialog(null)} aria-label="Close request review">{I('x', 16)}</button>
+            </div>
+            <div className="adm-modal-body">
+              <p>{requestReviewDialog.decision === 'Approved'
+                ? requestReviewDialog.request.type === 'cancellation'
+                  ? "This will cancel the customer's appointment, release the time slot, and stop future reminders."
+                  : "This will move the confirmed appointment to the requested available time."
+                : 'The appointment will remain confirmed and its time slot will stay blocked.'}</p>
+              {bookingActionError ? <div className="adm-alert adm-alert--warning" role="alert">{bookingActionError}</div> : null}
+              {requestReviewDialog.decision === 'Declined' ? (
+                <label className="adm-field">
+                  <span>Salon reason (optional)</span>
+                  <textarea maxLength={500} rows={4} value={requestReviewDialog.adminReason} onChange={(event) => setRequestReviewDialog((current) => ({ ...current, adminReason: event.target.value }))} placeholder="For example: Please contact the salon directly." />
+                  <small>{requestReviewDialog.adminReason.length} / 500</small>
+                </label>
+              ) : null}
+            </div>
+            <div className="adm-modal-actions">
+              <button className="adm-btn adm-btn--ghost" type="button" disabled={Boolean(requestUpdatingId)} onClick={() => setRequestReviewDialog(null)}>Go back</button>
+              <button className={cx('adm-btn', requestReviewDialog.decision === 'Approved' ? 'adm-btn--primary' : 'adm-btn--danger')} type="button" disabled={Boolean(requestUpdatingId)} onClick={handleAppointmentRequestDecision}>{requestUpdatingId ? requestReviewDialog.decision === 'Approved' ? 'Approving...' : 'Declining...' : requestReviewDialog.decision === 'Approved' ? 'Approve' : 'Decline request'}</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {/* ---------------- Customer details modal ---------------- */}
       {viewingCustomer && viewingCustomerSummary && (

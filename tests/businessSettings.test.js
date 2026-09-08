@@ -24,6 +24,7 @@ test('missing settings use safe operational defaults without mutating the source
   assert.equal(settings.phone, source.phone);
   assert.equal(settings.timezone, 'Asia/Manila');
   assert.equal(settings.businessHours.sunday.open, false);
+  assert.equal(settings.requireAdminApprovalForCancellation, true);
   assert.equal(source.businessHours, undefined);
 });
 

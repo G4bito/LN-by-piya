@@ -11,7 +11,8 @@ const image = (size, type = 'image/jpeg') => ({ size, type });
 
 test('Portfolio accepts supported images through 8 MB and rejects larger files', () => {
   assert.equal(getImageFileValidationError(image(2 * 1024 * 1024), 'portfolio'), '');
-  assert.equal(getImageFileValidationError(image(7.5 * 1024 * 1024, 'image/png'), 'portfolio'), '');
+  assert.equal(getImageFileValidationError(image(7 * 1024 * 1024, 'image/png'), 'portfolio'), '');
+  assert.equal(getImageFileValidationError(image(7.9 * 1024 * 1024, 'image/webp'), 'portfolio'), '');
   assert.equal(getImageFileValidationError(image(MAX_PORTFOLIO_IMAGE_SIZE, 'image/webp'), 'portfolio'), '');
   assert.match(
     getImageFileValidationError(image(8.5 * 1024 * 1024), 'portfolio'),
@@ -20,6 +21,8 @@ test('Portfolio accepts supported images through 8 MB and rejects larger files',
 });
 
 test('booking references use the separate 5 MB maximum', () => {
+  assert.equal(getImageFileValidationError(image(1 * 1024 * 1024), 'booking-references'), '');
+  assert.equal(getImageFileValidationError(image(4.5 * 1024 * 1024, 'image/png'), 'booking-references'), '');
   assert.equal(getImageFileValidationError(image(4.9 * 1024 * 1024), 'booking-references'), '');
   assert.equal(getImageFileValidationError(image(MAX_REFERENCE_PHOTO_SIZE), 'booking-references'), '');
   assert.match(
@@ -29,10 +32,13 @@ test('booking references use the separate 5 MB maximum', () => {
 });
 
 test('only intended raster image MIME types are accepted', () => {
-  ['application/pdf', 'image/svg+xml', 'text/html', 'application/zip'].forEach((type) => {
+  ['application/pdf', 'image/svg+xml', 'text/html', 'application/zip', 'image/jpg'].forEach((type) => {
     assert.match(getImageFileValidationError(image(1024, type), 'portfolio'), /JPG, PNG, or WebP/);
   });
-  assert.equal(getImageFileValidationError(image(1024, 'image/jpg'), 'portfolio'), '');
+  ['image/jpeg', 'image/png', 'image/webp'].forEach((type) => {
+    assert.equal(getImageFileValidationError(image(1024, type), 'portfolio'), '');
+    assert.equal(getImageFileValidationError(image(1024, type), 'booking-references'), '');
+  });
 });
 
 test('file sizes are formatted without exposing raw byte counts', () => {

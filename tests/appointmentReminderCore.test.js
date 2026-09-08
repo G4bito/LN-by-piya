@@ -5,8 +5,18 @@ import {
   getReminderClaimDecision,
   getReminderEligibility,
   getReminderRuntimeSettings,
+  getPendingReminderBookingIds,
   parseAppointmentDateTime,
 } from '../functions/appointmentReminderCore.js';
+
+test('pending cancellation and reschedule requests pause reminders for the related bookings', () => {
+  const paused = getPendingReminderBookingIds({
+    cancel: { bookingId: 'booking-a', type: 'cancellation', status: 'Pending' },
+    reschedule: { bookingId: 'booking-b', type: 'reschedule', status: 'Pending' },
+    reviewed: { bookingId: 'booking-c', type: 'cancellation', status: 'Declined' },
+  });
+  assert.deepEqual([...paused].sort(), ['booking-a', 'booking-b']);
+});
 
 test('runtime reminder settings respect Firebase toggles and timezone', () => {
   assert.deepEqual(getReminderRuntimeSettings({

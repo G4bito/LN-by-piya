@@ -1,0 +1,5 @@
+2026/09/08-21:57:21.367 6bf0 Creating DB C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test-8\Default\EdgeCoupons/coupons_data.db since it was missing.
+2026/09/08-21:57:21.377 6bf0 Reusing MANIFEST C:\Users\Admin\OneDrive\Documents\LN by piya\.tmp-edge-cancellation-test-8\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/09/08-21:57:21.630 18e0 Level-0 table #5: started
+2026/09/08-21:57:21.638 18e0 Level-0 table #5: 683273 bytes OK
+2026/09/08-21:57:21.640 18e0 Delete type=0 #3

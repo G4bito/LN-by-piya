@@ -67,7 +67,7 @@ function getStatusClass(status) {
   return 'is-pending';
 }
 
-function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment, onBookAgain, onRescheduleAppointment, businessSettings }) {
+function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment, onBookAgain, onRescheduleAppointment, businessSettings, notificationTarget }) {
   const settings = useMemo(() => normalizeBusinessSettings(businessSettings), [businessSettings]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -94,7 +94,11 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
   const [appointmentActionStatus, setAppointmentActionStatus] = useState('');
   const [appointmentActionSaving, setAppointmentActionSaving] = useState(false);
   const [appointmentChangeRequests, setAppointmentChangeRequests] = useState([]);
+  const [cancellationModalOpen, setCancellationModalOpen] = useState(false);
+  const [cancellationReason, setCancellationReason] = useState('');
+  const [cancellationRequestError, setCancellationRequestError] = useState('');
   const rewardModalBodyRef = useRef(null);
+  const notificationBookingRef = useRef(null);
 
   const cleanedName = name.trim().replace(/\s+/g, ' ');
   const cleanedPhone = phone.trim().replace(/[^\d]/g, '').slice(0, 11);
@@ -340,6 +344,15 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
     return { completed, next: upcoming[0] || null, history };
   }, [bookings]);
 
+  useEffect(() => {
+    if (!notificationTarget?.bookingId || loading || !notificationBookingRef.current) return undefined;
+    const animationFrame = window.requestAnimationFrame(() => {
+      notificationBookingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      notificationBookingRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [appointmentData.history.length, loading, notificationTarget?.bookingId, notificationTarget?.nonce]);
+
   const loyaltyState = useMemo(
     () => getLoyaltyState(loyaltyProfile, appointmentData.completed.length, loyaltyProgram),
     [appointmentData.completed.length, loyaltyProfile, loyaltyProgram]
@@ -356,19 +369,31 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
   const cancellationEligibility = canManageAppointmentOnline(appointmentData.next, 'cancel', settings);
   const rescheduleEligibility = canManageAppointmentOnline(appointmentData.next, 'reschedule', settings);
   const pendingCancellationRequest = appointmentChangeRequests.find((request) => request.bookingId === appointmentData.next?.id && request.type === 'cancellation' && request.status === 'Pending');
+  const cancellationRequest = appointmentChangeRequests.find((request) => request.bookingId === appointmentData.next?.id && request.type === 'cancellation');
+  const declinedCancellationRequest = cancellationRequest?.status === 'Declined' ? cancellationRequest : null;
   const pendingRescheduleRequest = appointmentChangeRequests.find((request) => request.bookingId === appointmentData.next?.id && request.type === 'reschedule' && request.status === 'Pending');
 
-  const handleCancelAppointment = async () => {
+  const handleCancelAppointment = () => {
     if (!appointmentData.next?.id || !cancellationEligibility.allowed || appointmentActionSaving) return;
-    if (!window.confirm('Send a cancellation request to the salon? Your appointment stays confirmed until the request is approved.')) return;
-    const reason = window.prompt('Reason for cancellation (optional):', '') || '';
+    setCancellationReason('');
+    setCancellationRequestError('');
+    setCancellationModalOpen(true);
+  };
+
+  const handleSubmitCancellationRequest = async () => {
+    if (!appointmentData.next?.id || !cancellationEligibility.allowed || appointmentActionSaving) return;
     setAppointmentActionSaving(true);
-    setAppointmentActionStatus('Sending cancellation request...');
+    setCancellationRequestError('');
+    setAppointmentActionStatus('Submitting request...');
     try {
-      await requestAppointmentCancellation(appointmentData.next, reason);
+      await requestAppointmentCancellation(appointmentData.next, cancellationReason);
+      setCancellationModalOpen(false);
+      setCancellationReason('');
       setAppointmentActionStatus('Cancellation request sent ✓');
     } catch (error) {
-      setAppointmentActionStatus(error?.message || 'The cancellation request could not be sent. Please try again.');
+      const message = error?.message || "We couldn't submit your cancellation request. Please try again.";
+      setCancellationRequestError(message);
+      setAppointmentActionStatus(message);
     } finally {
       setAppointmentActionSaving(false);
     }
@@ -397,6 +422,20 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
       document.body.style.overflow = previousBodyOverflow;
     };
   }, [allRewardsOpen]);
+
+  useEffect(() => {
+    if (!cancellationModalOpen) return undefined;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && !appointmentActionSaving) setCancellationModalOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+    };
+  }, [appointmentActionSaving, cancellationModalOpen]);
 
   return (
     <main className="profile-page">
@@ -500,6 +539,8 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
                     {appointmentData.next.status || 'Pending Confirmation'}
                   </span>
                 </div>
+                {pendingCancellationRequest ? <div className="profile-change-request-status is-pending"><strong>Cancellation request pending</strong><span>Your appointment remains confirmed while the salon reviews your request.</span></div> : null}
+                {declinedCancellationRequest ? <div className="profile-change-request-status is-declined"><strong>Cancellation request declined</strong><span>{declinedCancellationRequest.adminReason || 'Your appointment remains confirmed. Please contact the salon if you still need assistance.'}</span></div> : null}
                 <div className="profile-metric">
                   <span>Date</span>
                   <strong>{formatAppointmentDate(appointmentData.next.date)}</strong>
@@ -545,10 +586,11 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
                 {String(appointmentData.next.status || '').toLowerCase() === 'confirmed' && (settings.allowCustomerCancellation || settings.allowCustomerReschedule) ? (
                   <div className="profile-appointment-actions">
                     {settings.allowCustomerReschedule ? <button type="button" className="btn-secondary" disabled={!rescheduleEligibility.allowed || appointmentActionSaving || Boolean(pendingRescheduleRequest)} onClick={() => onRescheduleAppointment?.(appointmentData.next)}>{pendingRescheduleRequest ? 'Reschedule pending' : 'Request reschedule'}</button> : null}
-                    {settings.allowCustomerCancellation ? <button type="button" className="btn-ghost profile-cancel-appointment" disabled={!cancellationEligibility.allowed || appointmentActionSaving || Boolean(pendingCancellationRequest)} onClick={handleCancelAppointment}>{pendingCancellationRequest ? 'Cancellation pending' : 'Request cancellation'}</button> : null}
+                    {settings.allowCustomerCancellation && settings.requireAdminApprovalForCancellation ? <button type="button" className="btn-ghost profile-cancel-appointment" disabled={!cancellationEligibility.allowed || appointmentActionSaving || Boolean(cancellationRequest)} onClick={handleCancelAppointment}>{pendingCancellationRequest ? 'Request pending' : declinedCancellationRequest ? 'Request declined' : 'Request cancellation'}</button> : null}
+                    {settings.allowCustomerCancellation && !settings.requireAdminApprovalForCancellation ? <p className="muted">Direct online cancellation is not enabled. Please contact the salon directly.</p> : null}
                     {!cancellationEligibility.allowed && settings.allowCustomerCancellation ? <p className="muted">{cancellationEligibility.reason}</p> : null}
                     {!rescheduleEligibility.allowed && settings.allowCustomerReschedule ? <p className="muted">{rescheduleEligibility.reason}</p> : null}
-                    {pendingCancellationRequest || pendingRescheduleRequest ? <p className="muted">Your appointment and time slot remain confirmed while the salon reviews the request.</p> : null}
+                    {pendingRescheduleRequest ? <p className="muted">Your appointment and time slot remain confirmed while the salon reviews the reschedule request.</p> : null}
                     {appointmentActionStatus ? <p className="profile-status" role="status">{appointmentActionStatus}</p> : null}
                   </div>
                 ) : null}
@@ -570,7 +612,7 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
               {settings.lateArrivalPolicy ? <div><strong>Late arrival</strong><p>{settings.lateArrivalPolicy}</p></div> : null}
               {settings.noShowPolicy ? <div><strong>No-show</strong><p>{settings.noShowPolicy}</p></div> : null}
               {settings.appointmentPreparationNote ? <div><strong>Before your appointment</strong><p>{settings.appointmentPreparationNote}</p></div> : null}
-              <div><strong>Online appointment changes</strong><p>{settings.allowCustomerCancellation ? `Cancellation requests are accepted up to ${settings.cancellationDeadlineHours} hours before a confirmed appointment.` : 'Online cancellation requests are not currently available.'} {settings.allowCustomerReschedule ? `Reschedule requests are accepted up to ${settings.rescheduleDeadlineHours} hours before a confirmed appointment.` : 'Online reschedule requests are not currently available.'}</p></div>
+              <div><strong>Online appointment changes</strong><p>{settings.allowCustomerCancellation && settings.requireAdminApprovalForCancellation ? `Cancellation requests are accepted up to ${settings.cancellationDeadlineHours} hours before a confirmed appointment and require salon approval.` : 'Online cancellation requests are not currently available; please contact the salon directly.'} {settings.allowCustomerReschedule ? `Reschedule requests are accepted up to ${settings.rescheduleDeadlineHours} hours before a confirmed appointment.` : 'Online reschedule requests are not currently available.'}</p></div>
             </div>
           </section>
 
@@ -818,8 +860,14 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
                   const bookingQuantity = getBookingNailQuantity(booking);
                   const bookingService = SERVICES.find((serviceItem) => serviceItem.id === booking.service);
                   const bookingNailArt = getBookingNailArt(booking, bookingService);
+                  const bookingCancellationRequest = appointmentChangeRequests.find((request) => request.bookingId === booking.id && request.type === 'cancellation');
                   return (
-                    <li key={booking.id} className="history-item">
+                    <li
+                      key={booking.id}
+                      ref={notificationTarget?.bookingId === booking.id ? notificationBookingRef : null}
+                      className={`history-item ${notificationTarget?.bookingId === booking.id ? 'is-notification-target' : ''}`}
+                      tabIndex={notificationTarget?.bookingId === booking.id ? -1 : undefined}
+                    >
                       <div className="history-item-copy">
                         <strong>{getServiceName(booking.service)}</strong>
                         <p>{formatAppointmentDate(booking.date)} {'\u00b7'} {booking.time || 'Time to be confirmed'}</p>
@@ -831,6 +879,7 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
                         ) : null}
                         <small>Nail Art: {bookingNailArt.enabled ? `${bookingNailArt.quantity} nails × ${formatPeso(bookingNailArt.pricePerNail)} = ${formatPeso(bookingNailArt.total)}` : 'None'}</small>
                         {bookingService?.nailArtEligible ? <small>Reference photo: {booking.referenceImageUrl ? 'Attached ✓' : 'Not attached'}</small> : null}
+                        {bookingCancellationRequest ? <small className="history-request-status">Cancellation request: {bookingCancellationRequest.status}{bookingCancellationRequest.reviewedAt ? ` \u00b7 ${formatRewardDate(bookingCancellationRequest.reviewedAt)}` : ''}</small> : null}
                       </div>
                       <div className="history-item-meta">
                         <span className={`profile-status-badge ${getStatusClass(booking.status)}`}>
@@ -851,6 +900,36 @@ function ProfilePage({ user, bookings = [], onProfileUpdated, onBookAppointment,
           </div>
         </div>
       </section>
+
+      {cancellationModalOpen && appointmentData.next && typeof document !== 'undefined' ? createPortal((
+        <div className="profile-request-overlay" role="dialog" aria-modal="true" aria-labelledby="cancellation-request-heading" onClick={() => !appointmentActionSaving && setCancellationModalOpen(false)}>
+          <section className="profile-request-dialog" onClick={(event) => event.stopPropagation()}>
+            <header className="profile-request-dialog-header">
+              <div><span className="profile-reward-kicker">Appointment change</span><h2 id="cancellation-request-heading">Request cancellation</h2></div>
+              <button type="button" className="profile-rewards-dialog-close" disabled={appointmentActionSaving} onClick={() => setCancellationModalOpen(false)} aria-label="Close cancellation request">Ã—</button>
+            </header>
+            <div className="profile-request-dialog-body">
+              <p>Are you sure you want to request cancellation for:</p>
+              <div className="profile-request-appointment">
+                <strong>{getServiceName(appointmentData.next.service)}</strong>
+                <span>{formatAppointmentDate(appointmentData.next.date)}</span>
+                <span>{appointmentData.next.time || 'Time to be confirmed'}</span>
+              </div>
+              <label className="profile-request-reason">
+                <span>Reason for cancellation <small>Optional</small></span>
+                <textarea maxLength={500} rows={4} value={cancellationReason} onChange={(event) => setCancellationReason(event.target.value)} placeholder="You do not need to include sensitive personal information." />
+                <small>{cancellationReason.length} / 500</small>
+              </label>
+              <p className="profile-request-note">Your appointment remains confirmed and the time slot stays reserved until the salon approves your request.</p>
+              {cancellationRequestError ? <p className="profile-request-error" role="alert">{cancellationRequestError}</p> : null}
+            </div>
+            <footer className="profile-request-dialog-actions">
+              <button type="button" className="btn-ghost" disabled={appointmentActionSaving} onClick={() => setCancellationModalOpen(false)}>Keep appointment</button>
+              <button type="button" className="btn-primary" disabled={appointmentActionSaving} onClick={handleSubmitCancellationRequest}>{appointmentActionSaving ? 'Submitting Request...' : 'Submit request'}</button>
+            </footer>
+          </section>
+        </div>
+      ), document.body) : null}
 
       {allRewardsOpen && typeof document !== 'undefined' ? createPortal((
         <div className="profile-rewards-overlay" role="dialog" aria-modal="true" aria-labelledby="all-rewards-heading" onClick={() => setAllRewardsOpen(false)}>

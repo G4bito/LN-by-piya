@@ -1,0 +1,43 @@
+{
+   "action": {
+      "default_popup": "index.html#/popup"
+   },
+   "background": {
+      "service_worker": "background.js"
+   },
+   "content_scripts": [ {
+      "css": [ "content-scripts/scholar.css" ],
+      "js": [ "content-scripts/scholar.js" ],
+      "matches": [ "https://scholar.google.com/*", "https://scholar.google.co.jp/*", "https://scholar.google.co.uk/*", "https://scholar.google.de/*", "https://scholar.google.fr/*", "https://scholar.google.es/*", "https://scholar.google.com.hk/*", "https://scholar.google.com.tw/*" ],
+      "run_at": "document_end"
+   }, {
+      "js": [ "content-scripts/anydoc.js" ],
+      "matches": [ "https://anydoctranslator-test.toolsmart.ai/*", "https://anydoctranslator.toolsmart.ai/*" ],
+      "run_at": "document_end"
+   }, {
+      "all_frames": false,
+      "js": [ "content-scripts/wps-detector.js" ],
+      "matches": [ "https://anydoctranslator-test.toolsmart.ai/*", "https://anydoctranslator.toolsmart.ai/*" ],
+      "run_at": "document_end"
+   } ],
+   "default_locale": "en",
+   "description": "__MSG_extensionDescription__",
+   "host_permissions": [ "\u003Call_urls>" ],
+   "icons": {
+      "128": "icons/pdf128.png",
+      "16": "icons/pdf16.png",
+      "48": "icons/pdf48.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiTMT/gcE96JXF2Lhvsis90ImOAWmBtPq1+OLkkZalao66oYWyJNf8YwDATyykOIZFlvD9jqOUAxPzIQgpI+nDK3zhupnV6W5dPWdcrErpmfrs+jz2bl2e/SSddViBEv+T4CukkaTBlD0nHRbntGHP/4wD9ODrCCLSakPgOoYGy2bTpb+ZQltb7ZwG3k/wiLRT+fW6eSH51iYVtmt77jK1CnQtDNmD0kLVwr/fZxSxk/zUuPg2DtXznI6mgdHLI4uvjKgmSYRZTJCX3/p5pf0hYq3kh6R2G+IVkC8Rg9JJ5+wl0qj5C/x/hqc5CF++6PbWbRxIh0rrP9uBt6XNbk41wIDAQAB",
+   "manifest_version": 3,
+   "name": "__MSG_extensionName__",
+   "optional_permissions": [ "history", "downloads" ],
+   "options_page": "index.html#/options",
+   "permissions": [ "webRequest", "webNavigation", "storage", "tabs", "nativeMessaging", "declarativeNetRequest", "gcm", "cookies" ],
+   "update_url": "https://edge.microsoft.com/extensionwebstorebase/v1/crx",
+   "version": "1.0.0.53",
+   "web_accessible_resources": [ {
+      "matches": [ "https://ds.cache.wpscdn.com/*", "https://scholar.google.com/*" ],
+      "resources": [ "icons/pdf16.png", "icons/pdf48.png" ]
+   } ]
+}

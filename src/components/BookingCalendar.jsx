@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { getCustomerProfile, listenToScheduleMonth, requestAppointmentReschedule, saveBooking } from '../firebase';
+import { getCustomerProfile, getImageUploadErrorMessage, listenToScheduleMonth, requestAppointmentReschedule, saveBooking } from '../firebase';
 import { SERVICES, formatPeso } from '../constants/services';
 import { isValidPhoneNumber } from '../validation';
 import ServiceDetailsModal from './ServiceDetailsModal';
@@ -80,6 +80,9 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
   const [nailArtEnabled, setNailArtEnabled] = useState(defaultService?.nailArt?.enabled === true);
   const [nailArtQuantity, setNailArtQuantity] = useState(clampNailQuantity(defaultService?.nailArt?.quantity || 1, settings.maximumNailArtQuantity));
   const [referenceImageUrl, setReferenceImageUrl] = useState(defaultService?.referenceImageUrl || '');
+  const [referenceImageFile, setReferenceImageFile] = useState(defaultService?.referenceImageFile || null);
+  const [referencePreviewUrl, setReferencePreviewUrl] = useState('');
+  const [referenceUploadProgress, setReferenceUploadProgress] = useState(0);
   const [detailService, setDetailService] = useState(() => (
     defaultService?.openCustomization ? SERVICES.find((item) => item.id === defaultService.id) || null : null
   ));
@@ -128,6 +131,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
   const cleanedNotes = notes.trim();
   const isPerNailService = serviceRequiresNailQuantity(selected);
   const supportsNailArt = serviceSupportsNailArt(selected, settings);
+  const displayedReferenceImageUrl = referencePreviewUrl || referenceImageUrl;
   const servicePricingFields = createServicePricingFields(selected, nailQuantity, {
     enabled: nailArtEnabled,
     quantity: nailArtQuantity,
@@ -239,9 +243,20 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
   }, [date, now, settings]);
 
   useEffect(() => {
-    if (settings.allowReferencePhoto || !referenceImageUrl) return;
+    if (settings.allowReferencePhoto || (!referenceImageUrl && !referenceImageFile)) return;
     setReferenceImageUrl('');
-  }, [referenceImageUrl, settings.allowReferencePhoto]);
+    setReferenceImageFile(null);
+  }, [referenceImageFile, referenceImageUrl, settings.allowReferencePhoto]);
+
+  useEffect(() => {
+    if (!referenceImageFile) {
+      setReferencePreviewUrl('');
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(referenceImageFile);
+    setReferencePreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [referenceImageFile]);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -288,6 +303,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
       setNailArtEnabled(false);
       setNailArtQuantity(1);
       setReferenceImageUrl('');
+      setReferenceImageFile(null);
       setDate('');
       setTime('');
     }
@@ -300,6 +316,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     setNailArtEnabled(selection.nailArt?.enabled === true);
     setNailArtQuantity(clampNailQuantity(selection.nailArt?.quantity || 1, settings.maximumNailArtQuantity));
     setReferenceImageUrl(settings.allowReferencePhoto ? selection.referenceImageUrl || '' : '');
+    setReferenceImageFile(settings.allowReferencePhoto ? selection.referenceImageFile || null : null);
     setDate('');
     setTime('');
     setStep(1);
@@ -325,6 +342,8 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     setNailArtEnabled(defaultService?.nailArt?.enabled === true);
     setNailArtQuantity(clampNailQuantity(defaultService?.nailArt?.quantity || 1, settings.maximumNailArtQuantity));
     setReferenceImageUrl(settings.allowReferencePhoto ? defaultService?.referenceImageUrl || '' : '');
+    setReferenceImageFile(settings.allowReferencePhoto ? defaultService?.referenceImageFile || null : null);
+    setReferenceUploadProgress(0);
     setStatus(null);
     setError(null);
   };
@@ -361,16 +380,22 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
       time,
       email: user?.email || email || null,
       referenceImageUrl: referenceImageUrl || '',
+      referenceImageFile: settings.allowReferencePhoto ? referenceImageFile : null,
+      onReferenceUploadProgress: (progress) => {
+        setReferenceUploadProgress(progress);
+        setStatus(progress < 100 ? `Uploading reference photo: ${progress}%` : 'Saving your booking...');
+      },
       ...servicePricingFields,
     };
 
     try {
+      let savedBooking = null;
       if (rescheduleBooking?.id) {
         await requestAppointmentReschedule(rescheduleBooking, date, time);
       } else {
-        await saveBooking(bookingPayload);
+        savedBooking = await saveBooking(bookingPayload);
       }
-      setSubmittedBooking({ ...bookingPayload, status: rescheduleBooking ? 'Confirmed' : 'Pending Confirmation' });
+      setSubmittedBooking({ ...bookingPayload, ...savedBooking, referenceImageFile: undefined, onReferenceUploadProgress: undefined, status: rescheduleBooking ? 'Confirmed' : 'Pending Confirmation' });
       setBookingConfirmed(true);
       setStatus(null);
       setToast(null);
@@ -380,6 +405,8 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
       const isConflict = saveError?.code === SCHEDULE_CONFLICT_CODE || String(saveError?.code || '').includes('already-exists');
       const message = isConflict
         ? conflictMessage
+        : String(saveError?.code || '').startsWith('storage/')
+          ? getImageUploadErrorMessage(saveError)
         : rescheduleBooking
           ? saveError?.message || 'Unable to reschedule this appointment right now. Please try again.'
           : 'Unable to complete your booking right now. Please check your connection and try again.';
@@ -390,6 +417,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
       setError(message);
       setToast({ type: 'error', message });
       setStatus(null);
+      setReferenceUploadProgress(0);
     } finally {
       setIsSaving(false);
     }
@@ -617,7 +645,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                     ) : null}
                     <div className="review-row booking-reference-row">
                       <span>Reference photo</span>
-                      {referenceImageUrl ? <img className="booking-reference-thumbnail" src={referenceImageUrl} alt="Uploaded nail reference" loading="lazy" decoding="async" /> : <strong>Not attached</strong>}
+                      {displayedReferenceImageUrl ? <img className="booking-reference-thumbnail" src={displayedReferenceImageUrl} alt="Selected nail reference" loading="lazy" decoding="async" /> : <strong>Not attached</strong>}
                     </div>
                   </>
                 ) : null}
@@ -651,7 +679,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                 {servicePricingFields.nailArt.enabled ? <div className="review-row"><span>Nail Art add-on</span><strong>{formatPeso(servicePricingFields.nailArt.total)}</strong></div> : null}
               </>
             ) : <div className="review-row"><span>Nail Art</span><strong>None</strong></div>}
-            <div className="review-row"><span>Reference</span><strong>{referenceImageUrl ? 'Attached ✓' : 'None'}</strong></div>
+            <div className="review-row"><span>Reference</span><strong>{displayedReferenceImageUrl ? 'Attached ✓' : 'None'}</strong></div>
             <div className="review-row"><span>Date</span><strong>{formatAppointmentDate(date)}</strong></div>
             <div className="review-row"><span>Time</span><strong>{time ? formatSlotTime(time) : 'Not selected'}</strong></div>
             <div className="review-row total"><span>Estimated total</span><strong>{selected ? formatPeso(totalPrice) : '--'}</strong></div>
@@ -662,7 +690,11 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
           <div className="step-nav">
             {step > 0 ? <button type="button" className="btn-ghost" onClick={back} disabled={isSaving}>Back</button> : null}
             <button type="button" className="btn-primary" disabled={(step < STEPS.length - 1 && !canNext) || isSaving} onClick={step === STEPS.length - 1 ? handleConfirm : next} aria-busy={isSaving}>
-              {isSaving ? 'Saving...' : step === STEPS.length - 1 && rescheduleBooking ? 'Confirm Reschedule' : getContinueLabel(step)}
+              {isSaving
+                ? referenceUploadProgress > 0 && referenceUploadProgress < 100
+                  ? `Uploading photo ${referenceUploadProgress}%`
+                  : 'Saving...'
+                : step === STEPS.length - 1 && rescheduleBooking ? 'Confirm Reschedule' : getContinueLabel(step)}
             </button>
           </div>
           <p className="booking-secure-note"><span aria-hidden="true">&#128274;</span> Your information is secure and private.</p>
@@ -675,6 +707,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
         initialQuantity={service === detailService?.id ? nailQuantity : 1}
         initialNailArt={service === detailService?.id ? { enabled: nailArtEnabled, quantity: nailArtQuantity } : undefined}
         initialReferenceImageUrl={service === detailService?.id ? referenceImageUrl : ''}
+        initialReferenceImageFile={service === detailService?.id ? referenceImageFile : null}
         onClose={() => setDetailService(null)}
         onBookService={handleDetailedServiceBooking}
       />
