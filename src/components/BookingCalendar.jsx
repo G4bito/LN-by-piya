@@ -10,7 +10,7 @@ import {
   serviceSupportsNailArt,
 } from '../bookingPricing';
 import { SCHEDULE_CONFLICT_CODE, getServiceDurationMinutes, getUnavailableTimeSlots } from '../scheduling';
-import { filterBookingServices, getCalendarCells, SERVICE_FILTERS } from '../bookingUi';
+import { filterBookingServices, getCalendarCells, isDateFullyBooked, SERVICE_FILTERS } from '../bookingUi';
 import {
   BUSINESS_WEEKDAYS,
   addDaysToDateKey,
@@ -168,14 +168,21 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     const dateKeys = new Set([todayKey, ...scheduleEntries.map((entry) => entry.date).filter(Boolean)]);
     return new Set([...dateKeys].filter((dateKey) => {
       const slots = getBookableTimeSlots(dateKey, getServiceDurationMinutes(selected), settings, now);
-      if (!slots.length) return !getBookingDateRestriction(dateKey, settings, now);
-      return hasReachedDailyAppointmentLimit(scheduleEntries, dateKey, settings, availabilityClock, rescheduleBooking?.id)
-        || getUnavailableTimeSlots(slots, dateKey, selected, scheduleEntries, {
+      const dailyLimitReached = hasReachedDailyAppointmentLimit(
+        scheduleEntries,
+        dateKey,
+        settings,
+        availabilityClock,
+        rescheduleBooking?.id
+      );
+      if (!slots.length) return isDateFullyBooked(slots, new Set(), dailyLimitReached);
+      const unavailableSlots = getUnavailableTimeSlots(slots, dateKey, selected, scheduleEntries, {
         includePendingHolds: true,
-          now: availabilityClock,
-          bufferMinutes: settings.appointmentBufferMinutes,
-          excludeBookingId: rescheduleBooking?.id,
-      }).size === slots.length;
+        now: availabilityClock,
+        bufferMinutes: settings.appointmentBufferMinutes,
+        excludeBookingId: rescheduleBooking?.id,
+      });
+      return isDateFullyBooked(slots, unavailableSlots, dailyLimitReached);
     }));
   }, [availabilityClock, now, rescheduleBooking?.id, scheduleEntries, selected, settings, todayKey]);
   const calendarCells = useMemo(() => getCalendarCells(calendarMonth, {

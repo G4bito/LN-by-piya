@@ -12,10 +12,20 @@ export const BUSINESS_WEEKDAYS = Object.freeze([
 
 const DEFAULT_WEEKLY_HOURS = Object.freeze(Object.fromEntries(BUSINESS_WEEKDAYS.map((day) => [
   day.key,
-  Object.freeze({ open: day.key !== 'sunday', openTime: '09:00', closeTime: day.key === 'saturday' ? '17:00' : '18:00' }),
+  Object.freeze({ open: true, openTime: '10:00', closeTime: '22:00' }),
 ])));
 
 const DEFAULT_ONLINE_HOURS = Object.freeze(Object.fromEntries(BUSINESS_WEEKDAYS.map((day) => [
+  day.key,
+  Object.freeze({ open: true, openTime: '10:00', closeTime: '22:00' }),
+])));
+
+const LEGACY_BUSINESS_HOURS = Object.freeze(Object.fromEntries(BUSINESS_WEEKDAYS.map((day) => [
+  day.key,
+  Object.freeze({ open: day.key !== 'sunday', openTime: '09:00', closeTime: day.key === 'saturday' ? '17:00' : '18:00' }),
+])));
+
+const LEGACY_ONLINE_HOURS = Object.freeze(Object.fromEntries(BUSINESS_WEEKDAYS.map((day) => [
   day.key,
   Object.freeze({ open: day.key !== 'sunday', openTime: '09:00', closeTime: '16:00' }),
 ])));
@@ -88,11 +98,16 @@ function normalizeTime(value, fallback) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : fallback;
 }
 
-function normalizeWeeklyHours(value, fallback) {
+function normalizeWeeklyHours(value, fallback, legacyDefaults) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return Object.fromEntries(BUSINESS_WEEKDAYS.map((day) => {
     const fallbackDay = fallback[day.key];
     const incoming = source[day.key] && typeof source[day.key] === 'object' ? source[day.key] : {};
+    const legacyDay = legacyDefaults[day.key];
+    const isLegacyDefault = incoming.open === legacyDay.open
+      && normalizeTime(incoming.openTime, legacyDay.openTime) === legacyDay.openTime
+      && normalizeTime(incoming.closeTime, legacyDay.closeTime) === legacyDay.closeTime;
+    if (isLegacyDefault) return [day.key, { ...fallbackDay }];
     return [day.key, {
       open: incoming.open == null ? fallbackDay.open : incoming.open === true,
       openTime: normalizeTime(incoming.openTime, fallbackDay.openTime),
@@ -141,10 +156,10 @@ export function normalizeBusinessSettings(value = {}) {
     instagramUrl: String(source.instagramUrl || '').trim().slice(0, 500),
     tagline: String(source.tagline || source.description || '').trim().slice(0, 240),
     timezone: String(source.timezone || DEFAULT_BUSINESS_SETTINGS.timezone).trim().slice(0, 80),
-    businessHours: normalizeWeeklyHours(source.businessHours, DEFAULT_WEEKLY_HOURS),
+    businessHours: normalizeWeeklyHours(source.businessHours, DEFAULT_WEEKLY_HOURS, LEGACY_BUSINESS_HOURS),
     businessHoursConfigured: structuredBusinessHours,
     legacyBusinessHoursText: typeof source.businessHours === 'string' ? source.businessHours.trim().slice(0, 500) : '',
-    onlineBookingHours: normalizeWeeklyHours(source.onlineBookingHours, DEFAULT_ONLINE_HOURS),
+    onlineBookingHours: normalizeWeeklyHours(source.onlineBookingHours, DEFAULT_ONLINE_HOURS, LEGACY_ONLINE_HOURS),
     blackoutDates: normalizeBlackoutDates(source.blackoutDates),
     bookingInterval: toBoundedNumber(source.bookingInterval, DEFAULT_BUSINESS_SETTINGS.bookingInterval, 5, 240),
     minimumNoticeHours: toBoundedNumber(source.minimumNoticeHours, DEFAULT_BUSINESS_SETTINGS.minimumNoticeHours, 0, 720, false),
@@ -350,7 +365,7 @@ export function hasReachedDailyAppointmentLimit(entries = [], dateKey, settingsV
 }
 
 export function formatWeeklyBusinessHours(hoursValue) {
-  const hours = normalizeWeeklyHours(hoursValue, DEFAULT_WEEKLY_HOURS);
+  const hours = normalizeWeeklyHours(hoursValue, DEFAULT_WEEKLY_HOURS, LEGACY_BUSINESS_HOURS);
   const rows = BUSINESS_WEEKDAYS.map((day) => {
     const dayHours = hours[day.key];
     return {

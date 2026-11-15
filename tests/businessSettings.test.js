@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  BUSINESS_WEEKDAYS,
   canManageAppointmentOnline,
   formatWeeklyBusinessHours,
   getBookableTimeSlots,
@@ -23,15 +24,61 @@ test('missing settings use safe operational defaults without mutating the source
   const settings = normalizeBusinessSettings(source);
   assert.equal(settings.phone, source.phone);
   assert.equal(settings.timezone, 'Asia/Manila');
-  assert.equal(settings.businessHours.sunday.open, false);
+  assert.equal(settings.businessHours.sunday.open, true);
+  assert.equal(settings.onlineBookingHours.sunday.open, true);
   assert.equal(settings.requireAdminApprovalForCancellation, true);
   assert.equal(source.businessHours, undefined);
 });
 
-test('structured hours format cleanly and closed days block the calendar', () => {
+test('default salon and online booking hours are 10 AM to 10 PM every day', () => {
+  const settings = normalizeBusinessSettings();
+  const now = new Date('2026-09-06T00:00:00Z');
+
+  BUSINESS_WEEKDAYS.forEach((weekday, index) => {
+    const dateKey = `2026-09-${String(7 + index).padStart(2, '0')}`;
+    const businessHours = settings.businessHours[weekday.key];
+    const onlineHours = settings.onlineBookingHours[weekday.key];
+    const slots = getBookableTimeSlots(dateKey, 60, settings, now);
+
+    assert.deepEqual(businessHours, { open: true, openTime: '10:00', closeTime: '22:00' });
+    assert.deepEqual(onlineHours, { open: true, openTime: '10:00', closeTime: '22:00' });
+    assert.equal(slots[0], '10:00');
+    assert.equal(slots.at(-1), '21:00');
+    assert.equal(slots.length, 23);
+  });
+});
+
+test('previously saved default hours migrate to the new 10 AM to 10 PM schedule', () => {
+  const legacyBusinessHours = Object.fromEntries(BUSINESS_WEEKDAYS.map((day) => [
+    day.key,
+    {
+      open: day.key !== 'sunday',
+      openTime: '09:00',
+      closeTime: day.key === 'saturday' ? '17:00' : '18:00',
+    },
+  ]));
+  const legacyOnlineHours = Object.fromEntries(BUSINESS_WEEKDAYS.map((day) => [
+    day.key,
+    { open: day.key !== 'sunday', openTime: '09:00', closeTime: '16:00' },
+  ]));
+  const settings = normalizeBusinessSettings({
+    businessHours: legacyBusinessHours,
+    onlineBookingHours: legacyOnlineHours,
+  });
+  const sundaySlots = getBookableTimeSlots('2026-09-13', 60, settings, new Date('2026-09-06T00:00:00Z'));
+
+  BUSINESS_WEEKDAYS.forEach((day) => {
+    assert.deepEqual(settings.businessHours[day.key], { open: true, openTime: '10:00', closeTime: '22:00' });
+    assert.deepEqual(settings.onlineBookingHours[day.key], { open: true, openTime: '10:00', closeTime: '22:00' });
+  });
+  assert.equal(sundaySlots[0], '10:00');
+  assert.equal(sundaySlots.at(-1), '21:00');
+});
+
+test('structured closed hours still block the calendar', () => {
   const settings = normalizeBusinessSettings({
     businessHours: {
-      sunday: { open: false, openTime: '09:00', closeTime: '18:00' },
+      sunday: { open: false, openTime: '08:00', closeTime: '17:00' },
     },
   });
   const rows = formatWeeklyBusinessHours(settings.businessHours);

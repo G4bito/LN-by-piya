@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SERVICES } from '../src/constants/services.js';
-import { filterBookingServices, getCalendarCells } from '../src/bookingUi.js';
+import { filterBookingServices, getCalendarCells, isDateFullyBooked } from '../src/bookingUi.js';
 
 test('booking service filters return only services in the selected group', () => {
   assert.deepEqual(
@@ -36,4 +36,11 @@ test('calendar applies same-day, maximum advance, and blackout settings', () => 
   assert.equal(cells.find((cell) => cell.key === '2026-09-03').isSameDayUnavailable, true);
   assert.equal(cells.find((cell) => cell.key === '2026-09-10').isBlackout, true);
   assert.equal(cells.find((cell) => cell.key === '2026-09-21').isBeyondAdvanceWindow, true);
+});
+
+test('calendar does not mark a date full when no bookable slots remain but no bookings fill the day', () => {
+  assert.equal(isDateFullyBooked([], new Set()), false);
+  assert.equal(isDateFullyBooked([], new Set(), true), true);
+  assert.equal(isDateFullyBooked(['10:00', '10:30'], new Set(['10:00', '10:30'])), true);
+  assert.equal(isDateFullyBooked(['10:00', '10:30'], new Set(['10:00'])), false);
 });

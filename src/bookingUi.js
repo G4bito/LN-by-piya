@@ -20,6 +20,10 @@ export function toLocalDateKey(date) {
   return `${year}-${month}-${day}`;
 }
 
+export function isDateFullyBooked(timeSlots, unavailableTimeSlots, dailyLimitReached = false) {
+  return dailyLimitReached || (timeSlots.length > 0 && unavailableTimeSlots.size === timeSlots.length);
+}
+
 export function getCalendarCells(monthDate, options = {}) {
   const year = monthDate.getFullYear();
   const month = monthDate.getMonth();
