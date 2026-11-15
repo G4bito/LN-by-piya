@@ -75,6 +75,22 @@ test('previously saved default hours migrate to the new 10 AM to 10 PM schedule'
   assert.equal(sundaySlots.at(-1), '21:00');
 });
 
+test('a manually opened Sunday with old saved hours gets the new booking window', () => {
+  const settings = normalizeBusinessSettings({
+    businessHours: {
+      sunday: { open: true, openTime: '09:00', closeTime: '18:00' },
+    },
+    onlineBookingHours: {
+      sunday: { open: true, openTime: '09:00', closeTime: '16:00' },
+    },
+  });
+  const slots = getBookableTimeSlots('2026-11-15', 75, settings, new Date('2026-11-15T10:21:55Z'));
+
+  assert.deepEqual(settings.businessHours.sunday, { open: true, openTime: '10:00', closeTime: '22:00' });
+  assert.deepEqual(settings.onlineBookingHours.sunday, { open: true, openTime: '10:00', closeTime: '22:00' });
+  assert.deepEqual(slots, ['20:30']);
+});
+
 test('structured closed hours still block the calendar', () => {
   const settings = normalizeBusinessSettings({
     businessHours: {

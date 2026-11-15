@@ -104,7 +104,8 @@ function normalizeWeeklyHours(value, fallback, legacyDefaults) {
     const fallbackDay = fallback[day.key];
     const incoming = source[day.key] && typeof source[day.key] === 'object' ? source[day.key] : {};
     const legacyDay = legacyDefaults[day.key];
-    const isLegacyDefault = incoming.open === legacyDay.open
+    const isLegacyDefault = incoming.openTime != null
+      && incoming.closeTime != null
       && normalizeTime(incoming.openTime, legacyDay.openTime) === legacyDay.openTime
       && normalizeTime(incoming.closeTime, legacyDay.closeTime) === legacyDay.closeTime;
     if (isLegacyDefault) return [day.key, { ...fallbackDay }];
