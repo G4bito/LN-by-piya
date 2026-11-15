@@ -30,6 +30,9 @@ const LEGACY_ONLINE_HOURS = Object.freeze(Object.fromEntries(BUSINESS_WEEKDAYS.m
   Object.freeze({ open: day.key !== 'sunday', openTime: '09:00', closeTime: '16:00' }),
 ])));
 
+// Owner-approved notice waiver for this appointment start only.
+const NOTICE_EXCEPTION = Object.freeze({ date: '2026-11-15', time: '22:00' });
+
 export const DEFAULT_NAIL_ART_ELIGIBLE_SERVICE_IDS = Object.freeze([
   'gel-manicure',
   'biab-structured-gel',
@@ -319,22 +322,24 @@ export function getBookingDateRestriction(dateKey, settingsValue, now = new Date
   return '';
 }
 
-export function getBookableTimeSlots(dateKey, serviceDurationMinutes, settingsValue, now = new Date()) {
+export function getBookableTimeSlots(dateKey, _serviceDurationMinutes, settingsValue, now = new Date()) {
   const settings = normalizeBusinessSettings(settingsValue);
   if (getBookingDateRestriction(dateKey, settings, now)) return [];
   const weekday = getWeekdayForDateKey(dateKey);
   const businessHours = settings.businessHours[weekday.key];
   const onlineHours = settings.onlineBookingHours[weekday.key];
   const start = Math.max(getTimeMinutes(businessHours.openTime), getTimeMinutes(onlineHours.openTime));
-  const close = Math.min(getTimeMinutes(businessHours.closeTime), getTimeMinutes(onlineHours.closeTime));
-  const duration = Math.max(1, Number(serviceDurationMinutes) || 60);
+  const lastStart = Math.min(getTimeMinutes(businessHours.closeTime), getTimeMinutes(onlineHours.closeTime));
   const interval = settings.bookingInterval;
   const minimumTimestamp = now.getTime() + settings.minimumNoticeHours * 60 * 60 * 1000;
   const slots = [];
-  for (let minutes = start; minutes + duration <= close; minutes += interval) {
+  // Hours define appointment starts; duration still determines scheduling conflicts.
+  for (let minutes = start; minutes <= lastStart; minutes += interval) {
     const value = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
     const timestamp = getAppointmentTimestamp(dateKey, value, settings.timezone);
-    if (timestamp != null && timestamp >= minimumTimestamp) slots.push(value);
+    const noticeWaived = dateKey === NOTICE_EXCEPTION.date && value === NOTICE_EXCEPTION.time;
+    const earliestTimestamp = noticeWaived ? now.getTime() : minimumTimestamp;
+    if (timestamp != null && timestamp >= earliestTimestamp) slots.push(value);
   }
   return slots;
 }

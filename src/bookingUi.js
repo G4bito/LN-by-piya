@@ -1,3 +1,5 @@
+import { getBookableTimeSlots, getBookingDateRestriction, normalizeBusinessSettings } from './businessSettings.js';
+
 export const SERVICE_FILTERS = Object.freeze(['All', 'Manicure', 'Extensions', 'Removal', 'Repair']);
 
 const SERVICE_GROUPS = Object.freeze({
@@ -24,12 +26,25 @@ export function isDateFullyBooked(timeSlots, unavailableTimeSlots, dailyLimitRea
   return dailyLimitReached || (timeSlots.length > 0 && unavailableTimeSlots.size === timeSlots.length);
 }
 
+export function getDatesWithoutBookableTimes(monthDate, durationMinutes, settingsValue, now = new Date()) {
+  const settings = normalizeBusinessSettings(settingsValue);
+  const dates = new Set();
+  const daysInMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0).getDate();
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const key = toLocalDateKey(new Date(monthDate.getFullYear(), monthDate.getMonth(), day));
+    if (!getBookingDateRestriction(key, settings, now)
+      && getBookableTimeSlots(key, durationMinutes, settings, now).length === 0) dates.add(key);
+  }
+  return dates;
+}
+
 export function getCalendarCells(monthDate, options = {}) {
   const year = monthDate.getFullYear();
   const month = monthDate.getMonth();
   const todayKey = options.todayKey || toLocalDateKey(new Date());
   const closedWeekdays = new Set(options.closedWeekdays || []);
   const fullyBookedDates = options.fullyBookedDates || new Set();
+  const noAvailableTimesDates = options.noAvailableTimesDates || new Set();
   const blackoutDates = options.blackoutDates || new Set();
   const maximumDateKey = options.maximumDateKey || '';
   const allowSameDayBooking = options.allowSameDayBooking !== false;
@@ -46,6 +61,7 @@ export function getCalendarCells(monthDate, options = {}) {
     const isClosed = closedWeekdays.has(value.getDay());
     const isBlackout = blackoutDates.has(key);
     const isFullyBooked = fullyBookedDates.has(key);
+    const hasNoAvailableTimes = noAvailableTimesDates.has(key);
     cells.push({
       day,
       key,
@@ -55,7 +71,8 @@ export function getCalendarCells(monthDate, options = {}) {
       isSameDayUnavailable,
       isBeyondAdvanceWindow,
       isFullyBooked,
-      disabled: isPast || isSameDayUnavailable || isBeyondAdvanceWindow || isClosed || isBlackout || isFullyBooked,
+      hasNoAvailableTimes,
+      disabled: isPast || isSameDayUnavailable || isBeyondAdvanceWindow || isClosed || isBlackout || isFullyBooked || hasNoAvailableTimes,
     });
   }
 

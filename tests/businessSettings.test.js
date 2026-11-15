@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { getUnavailableTimeSlots } from '../src/scheduling.js';
 import {
   BUSINESS_WEEKDAYS,
   canManageAppointmentOnline,
@@ -43,8 +44,8 @@ test('default salon and online booking hours are 10 AM to 10 PM every day', () =
     assert.deepEqual(businessHours, { open: true, openTime: '10:00', closeTime: '22:00' });
     assert.deepEqual(onlineHours, { open: true, openTime: '10:00', closeTime: '22:00' });
     assert.equal(slots[0], '10:00');
-    assert.equal(slots.at(-1), '21:00');
-    assert.equal(slots.length, 23);
+    assert.equal(slots.at(-1), '22:00');
+    assert.equal(slots.length, 25);
   });
 });
 
@@ -72,7 +73,7 @@ test('previously saved default hours migrate to the new 10 AM to 10 PM schedule'
     assert.deepEqual(settings.onlineBookingHours[day.key], { open: true, openTime: '10:00', closeTime: '22:00' });
   });
   assert.equal(sundaySlots[0], '10:00');
-  assert.equal(sundaySlots.at(-1), '21:00');
+  assert.equal(sundaySlots.at(-1), '22:00');
 });
 
 test('a manually opened Sunday with old saved hours gets the new booking window', () => {
@@ -88,7 +89,7 @@ test('a manually opened Sunday with old saved hours gets the new booking window'
 
   assert.deepEqual(settings.businessHours.sunday, { open: true, openTime: '10:00', closeTime: '22:00' });
   assert.deepEqual(settings.onlineBookingHours.sunday, { open: true, openTime: '10:00', closeTime: '22:00' });
-  assert.deepEqual(slots, ['20:30']);
+  assert.deepEqual(slots, ['20:30', '21:00', '21:30', '22:00']);
 });
 
 test('structured closed hours still block the calendar', () => {
@@ -110,7 +111,7 @@ test('blackout dates block booking and become available after removal', () => {
   assert.equal(getBookingDateRestriction('2026-09-21', { ...blocked, blackoutDates: {} }, now), '');
 });
 
-test('booking interval, online hours, notice, and service duration drive generated slots', () => {
+test('booking interval and online hours limit appointment start times', () => {
   const settings = normalizeBusinessSettings({
     timezone: 'Asia/Manila',
     bookingInterval: 60,
@@ -119,7 +120,44 @@ test('booking interval, online hours, notice, and service duration drive generat
     onlineBookingHours: { monday: { open: true, openTime: '10:00', closeTime: '17:00' } },
   });
   const slots = getBookableTimeSlots('2026-09-14', 60, settings, new Date('2026-09-07T00:00:00Z'));
-  assert.deepEqual(slots, ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00']);
+  assert.deepEqual(slots, ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00']);
+});
+
+test('90-minute appointments offer hourly starts from 10 AM through 10 PM every day', () => {
+  const now = new Date('2026-11-15T18:27:00+08:00');
+  const settings = { bookingInterval: 60, minimumNoticeHours: 2 };
+  for (let day = 16; day <= 22; day += 1) {
+    const slots = getBookableTimeSlots(`2026-11-${day}`, 90, settings, now);
+    assert.equal(slots[0], '10:00');
+    assert.deepEqual(slots.slice(-2), ['21:00', '22:00']);
+    assert.equal(slots.length, 13);
+  }
+});
+
+test('late appointment starts still require the full two-hour advance notice', () => {
+  const settings = { bookingInterval: 60, minimumNoticeHours: 2 };
+  assert.deepEqual(getBookableTimeSlots('2026-11-16', 90, settings, new Date('2026-11-16T18:27:00+08:00')), ['21:00', '22:00']);
+  assert.deepEqual(getBookableTimeSlots('2026-11-16', 90, settings, new Date('2026-11-16T20:00:00+08:00')), ['22:00']);
+  assert.deepEqual(getBookableTimeSlots('2026-11-16', 90, settings, new Date('2026-11-16T20:00:01+08:00')), []);
+});
+
+test('the approved November 15 exception allows only the 10 PM start inside the notice period', () => {
+  const settings = { bookingInterval: 30, minimumNoticeHours: 2 };
+  assert.deepEqual(getBookableTimeSlots('2026-11-15', 90, settings, new Date('2026-11-15T20:15:00+08:00')), ['22:00']);
+  assert.deepEqual(getBookableTimeSlots('2026-11-15', 90, settings, new Date('2026-11-15T21:30:00+08:00')), ['22:00']);
+  assert.deepEqual(getBookableTimeSlots('2026-11-15', 90, settings, new Date('2026-11-15T22:00:01+08:00')), []);
+  assert.deepEqual(getBookableTimeSlots('2026-11-16', 90, settings, new Date('2026-11-16T21:30:00+08:00')), []);
+});
+
+test('late starts still block appointments that overlap an existing evening booking', () => {
+  const date = '2026-11-16';
+  const slots = getBookableTimeSlots(date, 90, { bookingInterval: 60 }, new Date('2026-11-15T18:27:00+08:00'));
+  const unavailable = getUnavailableTimeSlots(slots, date, { id: 'biab-structured-gel', durationMinutes: 90 }, [
+    { bookingId: 'evening-booking', date, time: '21:30', durationMinutes: 90, status: 'Confirmed' },
+  ]);
+  assert.equal(unavailable.has('20:00'), false);
+  assert.equal(unavailable.has('21:00'), true);
+  assert.equal(unavailable.has('22:00'), true);
 });
 
 test('same-day and maximum advance controls block invalid dates', () => {

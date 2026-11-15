@@ -10,7 +10,7 @@ import {
   serviceSupportsNailArt,
 } from '../bookingPricing';
 import { SCHEDULE_CONFLICT_CODE, getServiceDurationMinutes, getUnavailableTimeSlots } from '../scheduling';
-import { filterBookingServices, getCalendarCells, isDateFullyBooked, SERVICE_FILTERS } from '../bookingUi';
+import { filterBookingServices, getCalendarCells, getDatesWithoutBookableTimes, isDateFullyBooked, SERVICE_FILTERS } from '../bookingUi';
 import {
   BUSINESS_WEEKDAYS,
   addDaysToDateKey,
@@ -185,14 +185,21 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
       return isDateFullyBooked(slots, unavailableSlots, dailyLimitReached);
     }));
   }, [availabilityClock, now, rescheduleBooking?.id, scheduleEntries, selected, settings, todayKey]);
+  const noAvailableTimesDates = useMemo(() => getDatesWithoutBookableTimes(
+    calendarMonth,
+    selected ? getServiceDurationMinutes(selected) : 60,
+    settings,
+    now,
+  ), [calendarMonth, now, selected, settings]);
   const calendarCells = useMemo(() => getCalendarCells(calendarMonth, {
     todayKey,
     closedWeekdays,
     blackoutDates: blackoutDateKeys,
     fullyBookedDates,
+    noAvailableTimesDates,
     maximumDateKey,
     allowSameDayBooking: settings.allowSameDayBooking,
-  }), [blackoutDateKeys, calendarMonth, closedWeekdays, fullyBookedDates, maximumDateKey, settings.allowSameDayBooking, todayKey]);
+  }), [blackoutDateKeys, calendarMonth, closedWeekdays, fullyBookedDates, noAvailableTimesDates, maximumDateKey, settings.allowSameDayBooking, todayKey]);
   const canNext =
     (step === 0 && Boolean(service)) ||
     (step === 1 && Boolean(date && time) && timeSlots.includes(time) && !availabilityLoading && !availabilityError && !unavailableTimeSlots.has(time)) ||
@@ -542,17 +549,17 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                       <button
                         type="button"
                         key={cell.key}
-                        className={`${date === cell.key ? 'is-selected' : ''} ${cell.key === todayKey ? 'is-today' : ''} ${cell.isClosed ? 'is-closed' : ''} ${cell.isBlackout ? 'is-blackout' : ''} ${cell.isFullyBooked || cell.isBeyondAdvanceWindow || cell.isSameDayUnavailable ? 'is-unavailable' : ''}`}
+                        className={`${date === cell.key ? 'is-selected' : ''} ${cell.key === todayKey ? 'is-today' : ''} ${cell.isClosed ? 'is-closed' : ''} ${cell.isBlackout ? 'is-blackout' : ''} ${cell.isFullyBooked || cell.isBeyondAdvanceWindow || cell.isSameDayUnavailable || cell.hasNoAvailableTimes ? 'is-unavailable' : ''}`}
                         disabled={cell.disabled}
                         onClick={() => {
                           setDate(cell.key);
                           setTime('');
                           setError(null);
                         }}
-                        aria-label={`${formatAppointmentDate(cell.key)}${cell.isBlackout ? `, ${settings.blackoutDates[cell.key]?.reason || 'closed'}` : cell.isClosed ? ', closed' : cell.isFullyBooked ? ', fully booked' : cell.isBeyondAdvanceWindow ? ', outside booking window' : cell.isSameDayUnavailable ? ', same-day booking unavailable' : ''}`}
+                        aria-label={`${formatAppointmentDate(cell.key)}${cell.isBlackout ? `, ${settings.blackoutDates[cell.key]?.reason || 'closed'}` : cell.isClosed ? ', closed' : cell.isFullyBooked ? ', fully booked' : cell.isBeyondAdvanceWindow ? ', outside booking window' : cell.isSameDayUnavailable ? ', same-day booking unavailable' : cell.hasNoAvailableTimes ? ', no available times' : ''}`}
                       >
                         <span>{cell.day}</span>
-                        {cell.isBlackout ? <small>Closed</small> : cell.isClosed ? <small>Closed</small> : cell.isFullyBooked ? <small>Full</small> : cell.isBeyondAdvanceWindow ? <small>Unavailable</small> : cell.isSameDayUnavailable ? <small>Tomorrow</small> : null}
+                        {cell.isBlackout ? <small>Closed</small> : cell.isClosed ? <small>Closed</small> : cell.isFullyBooked ? <small>Full</small> : cell.isBeyondAdvanceWindow ? <small>Unavailable</small> : cell.isSameDayUnavailable ? <small>Tomorrow</small> : cell.hasNoAvailableTimes ? <small>No times</small> : null}
                       </button>
                     ) : <span className="booking-calendar-empty" key={`empty-${index}`} />)}
                   </div>
@@ -566,7 +573,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                   {availabilityLoading ? <p className="availability-message">Checking availability...</p> : null}
                   {availabilityError ? <p className="availability-message availability-message--error">{availabilityError}</p> : null}
                   {!date ? <p className="availability-message">Choose a date to see its available times.</p> : null}
-                  {date && !availabilityLoading && !availabilityError && timeGroups.length === 0 ? <p className="availability-message">No online times are available for this date.</p> : null}
+                  {date && !availabilityLoading && !availabilityError && timeGroups.length === 0 ? <p className="availability-message">No start times remain that meet the advance notice. Please choose another date.</p> : null}
                   {timeGroups.map((group) => (
                     <div className="booking-time-group" key={group.label}>
                       <strong>{group.label}</strong>
