@@ -1430,17 +1430,18 @@
   font-weight: 700;
 }
 
-.adm-action-cell {
+.adm-booking-actions {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
 }
 
 .adm-quick-actions {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 0.35rem;
-  margin-bottom: 0.4rem;
 }
 
 .adm-user-cell {

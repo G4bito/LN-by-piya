@@ -1861,21 +1861,23 @@ function AdminPage({
                               </span>
                               {pendingRequest ? <small className="adm-request-indicator">{pendingRequest.type === 'cancellation' ? 'Cancellation requested' : 'Reschedule requested'}</small> : null}
                             </td>
-                            <td className="adm-action-cell">
-                              {normalizedStatus === 'Pending Confirmation' ? (
-                                <div className="adm-quick-actions">
-                                  <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => handleBookingAction(booking.id, 'Confirmed')}>Confirm</button>
-                                  <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Decline this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Decline</button>
-                                </div>
-                              ) : normalizedStatus === 'Confirmed' ? (
-                                <div className="adm-quick-actions">
-                                  <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => handleBookingAction(booking.id, 'Completed')}>Complete</button>
-                                  {pendingRequest?.type === 'cancellation' ? <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" onClick={() => setSelectedBookingId(booking.id)}>Review request</button> : <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Cancel this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Cancel</button>}
-                                </div>
-                              ) : null}
-                              <button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => handleOpenBooking(booking)}>
-                                View details
-                              </button>
+                            <td>
+                              <div className="adm-booking-actions">
+                                {normalizedStatus === 'Pending Confirmation' ? (
+                                  <div className="adm-quick-actions">
+                                    <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => handleBookingAction(booking.id, 'Confirmed')}>Confirm</button>
+                                    <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Decline this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Decline</button>
+                                  </div>
+                                ) : normalizedStatus === 'Confirmed' ? (
+                                  <div className="adm-quick-actions">
+                                    <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => handleBookingAction(booking.id, 'Completed')}>Complete</button>
+                                    {pendingRequest?.type === 'cancellation' ? <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" onClick={() => setSelectedBookingId(booking.id)}>Review request</button> : <button className="adm-btn adm-btn--danger adm-btn--sm" type="button" disabled={statusUpdatingId === booking.id} onClick={() => window.confirm('Cancel this appointment?') && handleBookingAction(booking.id, 'Cancelled')}>Cancel</button>}
+                                  </div>
+                                ) : null}
+                                <button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => handleOpenBooking(booking)}>
+                                  View details
+                                </button>
+                              </div>
                             </td>
                           </tr>
                           );
