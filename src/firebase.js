@@ -763,6 +763,10 @@ export async function updateBookingStatus(bookingId, status) {
     throw new Error('The selected booking no longer exists.');
   }
   const booking = { id: bookingId, ...(bookingSnapshot.val() || {}) };
+  const customerUid = getAppointmentCustomerUid(booking);
+  if (normalizedStatus === 'Completed' && !customerUid) {
+    throw new Error('The appointment is not linked to a customer account and cannot earn a loyalty point.');
+  }
   const settingsSnapshot = await get(ref(rtdb, 'settings/business'));
   const businessSettings = normalizeBusinessSettings(settingsSnapshot.exists() ? settingsSnapshot.val() : {});
   if (isConfirmedScheduleStatus(normalizedStatus) && !isConfirmedScheduleStatus(booking.status)) {
@@ -837,7 +841,7 @@ export async function updateBookingStatus(bookingId, status) {
   }
 
   let rewardGiven = booking.rewardGiven === true;
-  if (normalizedStatus === 'Completed' && booking.uid && !rewardGiven) {
+  if (normalizedStatus === 'Completed' && customerUid && !rewardGiven) {
     let loyaltyProgram = null;
     try {
       const programSnapshot = await get(ref(rtdb, 'loyaltyProgram'));
@@ -846,13 +850,16 @@ export async function updateBookingStatus(bookingId, status) {
       console.warn('Unable to load the loyalty reward settings while awarding this visit.', error);
     }
 
-    const userRef = ref(rtdb, `users/${booking.uid}`);
+    const userRef = ref(rtdb, `users/${customerUid}`);
     const transactionResult = await runTransaction(userRef, (profile) => {
-      if (!profile) return;
+      // A cold cache can supply null even when the client exists on the server.
+      // Return null to let Firebase retry; undefined would abort the award.
+      // https://firebase.google.com/docs/database/web/read-and-write#save_data_as_transactions
+      if (profile === null) return null;
       return applyCompletedBookingReward(profile, bookingId, updatedAt, loyaltyProgram).profile;
-    });
+    }, { applyLocally: false });
 
-    if (!transactionResult.committed) {
+    if (!transactionResult.committed || !transactionResult.snapshot.exists()) {
       throw new Error('The appointment was completed, but the customer loyalty record could not be updated.');
     }
 
