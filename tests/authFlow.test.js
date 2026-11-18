@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getAdminAuthorizationFromRecord,
+  getAccountAccessErrorMessage,
+  getEmailAuthErrorMessage,
   getGoogleAuthErrorMessage,
   getPostAuthDestination,
   isFirebasePermissionDenied,
@@ -69,4 +71,25 @@ test('Google popup errors produce helpful customer-facing messages', () => {
     getGoogleAuthErrorMessage({ code: 'auth/popup-blocked' }),
     /allow popups/i
   );
+});
+
+test('credential errors offer safe recovery without exposing whether an account exists', () => {
+  const message = getEmailAuthErrorMessage({ code: 'auth/invalid-credential', message: 'Firebase internal details' });
+  assert.match(message, /email or password/i);
+  assert.match(message, /Google/);
+  assert.match(message, /reset/i);
+  assert.equal(message, getEmailAuthErrorMessage({ code: 'auth/user-not-found' }));
+  assert.equal(message, getEmailAuthErrorMessage({ code: 'auth/wrong-password' }));
+  assert.doesNotMatch(message, /Firebase internal details|does not exist/i);
+});
+
+test('post-auth access errors distinguish profile recovery and essential permission failures', () => {
+  assert.match(getAccountAccessErrorMessage({ code: 'account/profile-recovery-required' }), /profile.*contact/i);
+  assert.match(getAccountAccessErrorMessage({ code: 'PERMISSION_DENIED' }), /signed in.*account.*access/i);
+  assert.match(getAccountAccessErrorMessage({ code: 'database/network-error' }), /connection/i);
+});
+
+test('unsupported Google popup environments guide customers to an external browser', () => {
+  assert.match(getGoogleAuthErrorMessage({ code: 'auth/operation-not-supported-in-this-environment' }), /Safari.*Chrome/);
+  assert.match(getGoogleAuthErrorMessage({ code: 'auth/popup-blocked' }), /Safari.*Chrome/);
 });

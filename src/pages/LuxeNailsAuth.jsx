@@ -52,7 +52,9 @@ export default function LuxeNailsAuth({ onSubmit, onGoogleSignIn, title = 'Welco
 
     const trimmedName = name.trim().replace(/\s+/g, ' ');
     const trimmedEmail = email.trim().toLowerCase();
-    const trimmedPassword = password.trim();
+    // Existing credentials are exact, case-sensitive strings. Keep the existing
+    // signup policy, but never alter a customer's password while signing in.
+    const passwordValue = isSignUp ? password.trim() : password;
     const nameRegex = /^[A-Za-zÀ-ÖØ-öø-ÿ' -]{2,60}$/;
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
@@ -67,18 +69,18 @@ export default function LuxeNailsAuth({ onSubmit, onGoogleSignIn, title = 'Welco
       return;
     }
 
-    if (mode === 'signup' && !passwordRegex.test(trimmedPassword)) {
+    if (mode === 'signup' && !passwordRegex.test(passwordValue)) {
       setError('Password must be at least 8 characters with upper, lower, number, and symbol.');
       return;
     }
 
-    if (mode === 'signin' && trimmedPassword.length === 0) {
+    if (mode === 'signin' && passwordValue.length === 0) {
       setError('Please enter your password.');
       return;
     }
 
     if (onSubmit) {
-      onSubmit({ name: trimmedName, email: trimmedEmail, password: trimmedPassword, mode, remember: rememberMe });
+      onSubmit({ name: trimmedName, email: trimmedEmail, password: passwordValue, mode, remember: rememberMe });
     }
   }
 

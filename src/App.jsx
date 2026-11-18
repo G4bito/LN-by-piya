@@ -5,6 +5,7 @@ import { SERVICES } from './constants/services';
 import { isValidPhoneNumber } from './validation';
 import { createServiceBookingSelection, getBookingNailArt, serviceSupportsNailArt } from './bookingPricing';
 import { normalizeBusinessSettings } from './businessSettings';
+import { getAccountAccessErrorMessage } from './authFlow';
 
 const HomePage = lazy(() => import('./pages/HomePage'));
 const BookingPage = lazy(() => import('./pages/BookingPage'));
@@ -373,7 +374,7 @@ function App() {
         } catch (error) {
           if (!isMounted || eventId !== authEventId) return;
           console.error('Unable to resolve authenticated account authorization', error);
-          setAuthErrorMessage('Unable to verify account access. Please sign in again.');
+          setAuthErrorMessage(getAccountAccessErrorMessage(error));
           setUser(null);
           setIsSignedIn(false);
           setIsAdmin(false);

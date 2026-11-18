@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import LuxeNailsAuth from './LuxeNailsAuth';
 import { signInWithGoogle, signInWithEmail, createAccountWithEmail } from '../firebase';
-import { getGoogleAuthErrorMessage } from '../authFlow';
+import { getEmailAuthErrorMessage, getGoogleAuthErrorMessage } from '../authFlow';
 
 export default function Login({ onAuthSuccess, onAuthStart, onAuthFinish, pendingBooking, errorMessage = '' }) {
   const [loading, setLoading] = useState(false);
@@ -28,7 +28,7 @@ export default function Login({ onAuthSuccess, onAuthStart, onAuthFinish, pendin
 
       onAuthSuccess?.(authenticatedUser);
     } catch (err) {
-      setError(err.message || 'Failed to authenticate. Please try again.');
+      setError(getEmailAuthErrorMessage(err, mode));
       onAuthFinish?.();
     } finally {
       authInFlightRef.current = false;

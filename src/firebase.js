@@ -348,22 +348,9 @@ export async function signInWithGoogle(remember = true) {
 
   await applyPersistence(remember);
 
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-
-    const authorization = await checkUserAuthorization(result.user.uid, result.user.email);
-    if (authorization.status === 'inactive') {
-      await signOut(auth);
-      throw new Error('Your account has been deactivated. Please contact support.');
-    }
-
-    if (!authorization.isAdmin) {
-      await createOrUpdateCustomerRecord(result.user);
-    }
-    return result.user;
-  } catch (error) {
-    throw error;
-  }
+  // App's auth-state observer owns authorization and profile provisioning once.
+  const result = await signInWithPopup(auth, googleProvider);
+  return result.user;
 }
 
 export async function signInWithEmail(email, password, remember = true) {
@@ -373,16 +360,7 @@ export async function signInWithEmail(email, password, remember = true) {
 
   await applyPersistence(remember);
   const result = await signInWithEmailAndPassword(auth, email, password);
-
-  const authorization = await checkUserAuthorization(result.user.uid, result.user.email);
-  if (authorization.status === 'inactive') {
-    await signOut(auth);
-    throw new Error('Your account has been deactivated. Please contact support.');
-  }
-
-  if (!authorization.isAdmin) {
-    await createOrUpdateCustomerRecord(result.user);
-  }
+  // Do not race App's observer with a second authorization/profile write.
   return result.user;
 }
 
@@ -1437,6 +1415,21 @@ async function syncCustomerRecord(user) {
   try {
     const snap = await get(userRef);
     const existing = snap.exists() ? snap.val() : {};
+    if (snap.exists()) {
+      const emailMatches = String(existing.email || '').trim().toLowerCase() === String(user.email || '').trim().toLowerCase();
+      if (existing.uid !== user.uid || !emailMatches || existing.status !== 'active') {
+        const error = new Error('Your account profile needs support before it can be used. Please contact the salon.');
+        error.code = 'account/profile-recovery-required';
+        throw error;
+      }
+      // Signing in verifies the UID-owned record; it does not edit it. In the
+      // deployed rules, val() comparisons on nested loyalty data reject even
+      // unrelated metadata writes. Optional login metadata must not gate access.
+      // https://firebase.google.com/docs/reference/security/database#val
+      const profile = mergeProfileData(readStoredProfile(user.uid), existing);
+      writeStoredProfile(user.uid, profile);
+      return profile;
+    }
     const displayName = user.displayName || existing.displayName || '';
     const normalizedName = sanitizeName(displayName || user.email?.split('@')[0] || 'Guest');
 
