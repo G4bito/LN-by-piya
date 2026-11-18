@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { getCustomerProfile, getImageUploadErrorMessage, listenToScheduleMonth, requestAppointmentReschedule, saveBooking } from '../firebase';
+import { createBookingId, getCustomerProfile, getImageUploadErrorMessage, listenToScheduleMonth, requestAppointmentReschedule, saveBooking } from '../firebase';
+import { bookingDiagnostic, bookingErrorMessage } from '../../functions/shared/bookingErrors.js';
 import { SERVICES, formatPeso } from '../constants/services';
 import { isValidPhoneNumber } from '../validation';
 import ServiceDetailsModal from './ServiceDetailsModal';
@@ -408,10 +409,9 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
       ...servicePricingFields,
     };
     const intentKey = JSON.stringify({ ...bookingPayload, referenceImageFile: referenceImageFile ? [referenceImageFile.name, referenceImageFile.size, referenceImageFile.lastModified] : null });
-    if (bookingIntentRef.current?.key !== intentKey) bookingIntentRef.current = { key: intentKey, id: crypto.randomUUID() };
-    bookingPayload.id = bookingIntentRef.current.id;
-
     try {
+      if (bookingIntentRef.current?.key !== intentKey) bookingIntentRef.current = { key: intentKey, id: createBookingId() };
+      bookingPayload.id = bookingIntentRef.current.id;
       let savedBooking = null;
       if (rescheduleBooking?.id) {
         await requestAppointmentReschedule(rescheduleBooking, date, time);
@@ -423,7 +423,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
       setStatus(null);
       setToast(null);
     } catch (saveError) {
-      console.error('Booking save failed:', saveError);
+      if (rescheduleBooking) console.error('Reschedule request failed.', bookingDiagnostic(saveError, 'request-reschedule'));
       const conflictMessage = 'This date and time has already been booked. Please choose another available time.';
       const isConflict = saveError?.code === SCHEDULE_CONFLICT_CODE || String(saveError?.code || '').includes('already-exists');
       const message = isConflict
@@ -432,7 +432,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
           ? getImageUploadErrorMessage(saveError)
         : rescheduleBooking
           ? saveError?.message || 'Unable to reschedule this appointment right now. Please try again.'
-          : 'Unable to complete your booking right now. Please check your connection and try again.';
+          : bookingErrorMessage(saveError);
       if (isConflict) {
         setTime('');
         setStep(1);

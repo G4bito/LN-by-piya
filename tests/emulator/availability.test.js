@@ -156,3 +156,64 @@ test('authorized administrator date writes work and inactive administrators are 
   await database.ref(`admins/${admin.uid}/status`).set('inactive');
   await assert.rejects(service.saveAvailability({ auth: admin, data: { date, override: null } }), { code: 'permission-denied' });
 });
+
+function failingDatabase(mode) {
+  let lockCalls = 0;
+  return { ref(path) {
+    const target = database.ref(path);
+    return new Proxy(target, { get(reference, key) {
+      if (key === 'update' && !path) return async updates => {
+        if (mode === 'notification' && Object.keys(updates).some(item => item.startsWith('adminNotifications/'))) throw Object.assign(new Error('demo notification outage'), { code: 'unavailable' });
+        if (mode === 'commit') throw Object.assign(new Error('demo write outage'), { code: 'unavailable' });
+        const result = await reference.update(updates);
+        if (mode === 'lost-response') throw Object.assign(new Error('demo lost response'), { code: 'unavailable' });
+        return result;
+      };
+      if (key === 'transaction' && path?.startsWith('adminNotifications/') && mode === 'notification') return async () => { throw Object.assign(new Error('demo notification outage'), { code: 'unavailable' }); };
+      if (key === 'transaction' && path?.startsWith('scheduleMutexes/') && mode === 'release') return (...args) => {
+        if (++lockCalls > 1) throw Object.assign(new Error('demo release outage'), { code: 'unavailable' });
+        return reference.transaction(...args);
+      };
+      const value = reference[key]; return typeof value === 'function' ? value.bind(reference) : value;
+    } });
+  } };
+}
+
+test('optional notification failure cannot roll back a successfully reserved appointment', async () => {
+  const logs = [];
+  const isolated = createBookingAvailabilityService(failingDatabase('notification'), { log: value => logs.push(value) });
+  const booking = await isolated.submitBooking(request());
+  assert.equal((await database.ref(`bookings/${booking.id}`).get()).val().status, 'Pending Confirmation');
+  assert.equal((await database.ref(`scheduleSlots/${date}/${booking.id}`).get()).val().status, 'Pending Confirmation');
+  assert.equal((await database.ref(`adminNotifications/${booking.id}`).get()).exists(), false);
+  assert.equal(logs[0].operation, 'create-admin-notification');
+  await service.submitBooking(request());
+  assert.equal((await database.ref(`adminNotifications/${booking.id}`).get()).exists(), true);
+});
+
+test('failed atomic booking write releases the provisional reservation and retries safely', async () => {
+  const isolated = createBookingAvailabilityService(failingDatabase('commit'));
+  await assert.rejects(isolated.submitBooking(request()));
+  assert.equal((await database.ref('bookings').get()).exists(), false);
+  assert.equal((await database.ref(`scheduleSlots/${date}`).get()).exists(), false);
+  assert.equal((await database.ref(`scheduleMutexes/${date}`).get()).exists(), false);
+  await service.submitBooking(request());
+  assert.equal(Object.keys((await database.ref('bookings').get()).val()).length, 1);
+});
+
+test('lost commit response replays the saved booking without freeing its reservation', async () => {
+  const isolated = createBookingAvailabilityService(failingDatabase('lost-response'));
+  const booking = await isolated.submitBooking(request());
+  const retry = await service.submitBooking(request());
+  assert.equal(booking.id, retry.id);
+  assert.equal((await database.ref(`scheduleSlots/${date}/${booking.id}/status`).get()).val(), 'Pending Confirmation');
+  assert.equal(Object.keys((await database.ref('bookings').get()).val()).length, 1);
+});
+
+test('a mutex-release outage does not report a committed booking as failed', async () => {
+  const logs = [];
+  const isolated = createBookingAvailabilityService(failingDatabase('release'), { log: value => logs.push(value) });
+  const booking = await isolated.submitBooking(request());
+  assert.equal((await database.ref(`bookings/${booking.id}`).get()).val().id, booking.id);
+  assert.equal(logs[0].operation, 'release-date-lock');
+});

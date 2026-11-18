@@ -4,3 +4,5 @@ This project is a React + Vite frontend for a nail salon booking system. It incl
 
 See [Settings and booking availability](docs/booking-availability.md) for the admin workflow, Firebase paths, security, tests, and coordinated publication requirements.
 
+See [Booking submission repair](docs/booking-submission-fix.md) for the same-origin Vercel booking API, required server-only configuration, and deployment checks. The API is required alongside the frontend; the booking transport no longer depends on undeployed Firebase callable functions.
+

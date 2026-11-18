@@ -2,7 +2,8 @@
 // npm install firebase
 
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { requestBookingOperation } from './bookingApi.js';
+import { bookingDiagnostic } from '../functions/shared/bookingErrors.js';
 import {
   getAuth,
   GoogleAuthProvider,
@@ -495,21 +496,26 @@ async function createCustomerRequestSentNotification(request, booking) {
   });
 }
 
+export function createBookingId() {
+  if (!rtdb) throw Object.assign(new Error('Booking is temporarily unavailable.'), { code: 'booking/unavailable' });
+  return push(ref(rtdb, 'bookings')).key;
+}
+
 export async function saveBooking(booking) {
-  if (!isRealtimeDatabaseAvailable() || !auth?.currentUser) {
-    throw new Error('Please sign in before submitting a booking.');
-  }
   const { referenceImageFile, onReferenceUploadProgress, ...bookingData } = booking || {};
-  const id = bookingData.id || push(ref(rtdb, 'bookings')).key;
-  const settingsSnapshot = await get(ref(rtdb, 'settings/business'));
-  const settings = normalizeBusinessSettings(settingsSnapshot.val() || {});
-  const duration = getAppointmentDurationMinutes(bookingData);
-  if (!getBookableTimeSlots(bookingData.date, duration, settings, new Date()).includes(bookingData.time)) {
-    throw new ScheduleConflictError('This time is no longer available. Please select another time.');
-  }
   let uploadedReference = null;
+  let operation = 'verify-customer-session';
   try {
+    if (!isRealtimeDatabaseAvailable() || !auth?.currentUser) throw Object.assign(new Error('Please sign in before booking.'), { code: 'booking/unauthenticated' });
+    const id = bookingData.id || createBookingId();
+    operation = 'load-business-settings';
+    const settingsSnapshot = await get(ref(rtdb, 'settings/business'));
+    const settings = normalizeBusinessSettings(settingsSnapshot.val() || {});
+    operation = 'validate-availability';
+    const duration = getAppointmentDurationMinutes(bookingData);
+    if (!getBookableTimeSlots(bookingData.date, duration, settings, new Date()).includes(bookingData.time)) throw new ScheduleConflictError('This time is no longer available. Please select another time.');
     if (settings.allowReferencePhoto && referenceImageFile) {
+      operation = 'upload-reference-photo';
       uploadedReference = await uploadImageFile(referenceImageFile, 'booking-references', onReferenceUploadProgress, {
         pathSegments: [id], returnMetadata: true,
       });
@@ -525,18 +531,20 @@ export async function saveBooking(booking) {
       delete bookingData.referenceImageUrl;
       delete bookingData.referenceImageStoragePath;
     }
-    const result = await httpsCallable(getFunctions(app, 'asia-southeast1'), 'submitBooking')({ ...bookingData, id });
+    operation = 'submit-booking-api';
+    const result = await requestBookingOperation(auth.currentUser, 'submit', { ...bookingData, id });
     // A retry may replay a previously saved booking and its original photo.
-    if (uploadedReference && result.data.referenceImageStoragePath !== uploadedReference.storagePath) {
+    if (uploadedReference && result.referenceImageStoragePath !== uploadedReference.storagePath) {
       await deleteImageFile(uploadedReference.storagePath).catch(() => {});
     }
-    return result.data;
+    return result;
   } catch (error) {
+    console.error('Booking submission failed.', bookingDiagnostic(error, operation));
     // Do not delete a photo on an ambiguous network failure: the server may have saved it.
-    if (uploadedReference && ['functions/invalid-argument', 'functions/permission-denied', 'functions/failed-precondition', 'functions/already-exists'].includes(error?.code)) {
+    if (uploadedReference && ['invalid-argument', 'permission-denied', 'failed-precondition', 'already-exists'].includes(String(error?.code || '').split('/').pop())) {
       await deleteImageFile(uploadedReference.storagePath).catch(() => {});
     }
-    if (['functions/failed-precondition', 'functions/already-exists', 'functions/aborted'].includes(error?.code)) {
+    if (['failed-precondition', 'already-exists', 'aborted'].includes(String(error?.code || '').split('/').pop())) {
       throw new ScheduleConflictError(error.message);
     }
     throw error;
@@ -547,10 +555,9 @@ export async function saveBookingAvailability(date, override, acknowledgedAppoin
   if (!app || !auth?.currentUser) throw new Error('Please sign in as an administrator.');
   const errors = validateDateOverride(date, override);
   if (errors.length) throw new Error(errors[0]);
-  const result = await httpsCallable(getFunctions(app, 'asia-southeast1'), 'saveBookingAvailability')({
+  return requestBookingOperation(auth.currentUser, 'availability', {
     date, override, acknowledgedAppointmentIds,
   });
-  return result.data;
 }
 
 function getScheduleEntries(snapshot) {

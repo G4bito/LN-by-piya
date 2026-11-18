@@ -1,5 +1,7 @@
 # Settings and booking availability
 
+Current booking/availability publication uses the same-origin Vercel API described in [Booking submission repair](booking-submission-fix.md). That transport replaces the Firebase callable dependency in the original implementation report below and requires server-only Firebase Admin configuration on Vercel.
+
 Implementation is local on `feature/booking-availability-manager`. Nothing has been pushed or deployed. No production bookings or settings were changed to test this feature.
 
 ## Admin experience
@@ -65,10 +67,10 @@ For emulator tests, use Firebase CLI and Java 21+. The development computer's Ja
 
 ## Publication and remaining checks
 
-Publication requires the owner's approval. No new Firebase configuration variables or data migration are needed; existing Firebase project/database configuration and the `asia-southeast1` Functions region are reused. Deploy only the two new callables (`submitBooking`, `saveBookingAvailability`), the database rules, and the matching frontend as a coordinated release. Do not deploy unrelated scheduled functions. Do not change the Firebase billing plan.
+Publication requires the owner's approval. The current transport is the Vercel API described in [Booking submission repair](booking-submission-fix.md), with server-only Firebase Admin configuration. No data migration or Firebase billing change is needed. The retained callable exports are not required by the current frontend.
 
-Deploy the callables before switching the frontend/rules, then publish the matching frontend and tightened rules together and have existing clients reload. There is deliberately no fallback to unsafe direct customer booking writes. Publishing rules alone while an old frontend is cached would prevent that old frontend from creating bookings.
+Configure the API before publishing the matching frontend and approve the tightened rules as part of the coordinated release. There is no fallback to direct customer booking writes. Publishing rules alone while an old frontend is cached would prevent that old frontend from creating bookings.
 
-The deployed callable HTTP/auth boundary, real Storage reference-photo uploads, and production notification delivery still need an approved staging/deployment smoke test. Emulator service tests exercise the real database and rules but do not claim a deployed Cloud Functions or production end-to-end test. No deployment or billing action has been performed.
+The current HTTP/auth boundary has local API integration coverage; see the repair report for results. A deployed Vercel API, real Storage reference-photo uploads, real iPhone browsers, and production notification delivery still need an approved staging/deployment smoke test. No deployment or billing action has been performed.
 
 Implementation follows the official [Firebase callable documentation](https://firebase.google.com/docs/functions/callable), [transaction behavior](https://firebase.google.com/docs/database/web/read-and-write#save_data_as_transactions), and [Realtime Database emulator guidance](https://firebase.google.com/docs/emulator-suite/connect_rtdb).
