@@ -36,7 +36,10 @@ import {
   matchesAppointmentFilter,
   normalizeBookingStatus,
 } from '../adminData';
-import { DEFAULT_LOYALTY_REWARDS, LOYALTY_REWARD_TYPES } from '../loyaltyProgram';
+import { DEFAULT_LOYALTY_REWARDS } from '../loyaltyProgram';
+import { createRewardDraft } from '../rewardEditor';
+import RewardEditorModal from '../components/RewardEditorModal';
+import RewardManagementList from '../components/RewardManagementList';
 import { formatFileSize } from '../imageUploadConfig';
 import {
   DEFAULT_BUSINESS_SETTINGS,
@@ -214,28 +217,6 @@ function getReminderDisplay(booking, reminderType) {
     return { label: 'Not scheduled', tone: 'muted', detail: 'Appointment is not confirmed' };
   }
   return { label: 'Pending', tone: 'muted', detail: 'Waiting for reminder window' };
-}
-
-function createRewardDraft(reward = null) {
-  return {
-    id: reward?.id || '',
-    name: reward?.name || '',
-    description: reward?.description || '',
-    requiredVisits: reward?.requiredVisits || '',
-    rewardType: reward?.rewardType || 'custom',
-    value: reward?.value ?? '',
-    active: reward?.active !== false,
-    sortOrder: reward?.sortOrder || 1,
-    createdAt: reward?.createdAt || '',
-  };
-}
-
-function getRewardTypeLabel(value) {
-  return LOYALTY_REWARD_TYPES.find((type) => type.value === value)?.label || 'Custom Reward';
-}
-
-function rewardTypeNeedsValue(value) {
-  return value === 'percentage_discount' || value === 'fixed_discount';
 }
 
 function getBookingCustomerName(booking) {
@@ -422,6 +403,10 @@ function AdminPage({
   const [rewardDraft, setRewardDraft] = useState(null);
   const [loyaltySaving, setLoyaltySaving] = useState(false);
   const [loyaltySaveStatus, setLoyaltySaveStatus] = useState('');
+  const [rewardSaveError, setRewardSaveError] = useState('');
+  const [loyaltyLoading, setLoyaltyLoading] = useState(true);
+  const [loyaltyLoadError, setLoyaltyLoadError] = useState('');
+  const rewardActionInFlightRef = useRef(false);
   const [claimingRewardUserId, setClaimingRewardUserId] = useState('');
   const [rewardActionStatus, setRewardActionStatus] = useState('');
   const [businessSettings, setBusinessSettings] = useState(() => normalizeBusinessSettings(businessSettingsProp));
@@ -442,8 +427,13 @@ function AdminPage({
     const unsubscribe = listenToLoyaltyProgram(
       (program) => {
         setLoyaltyProgram(program);
+        setLoyaltyLoading(false);
+        setLoyaltyLoadError('');
       },
-      () => setLoyaltySaveStatus('Reward settings could not be loaded. Check the Firebase rules and retry.')
+      () => {
+        setLoyaltyLoading(false);
+        setLoyaltyLoadError('Rewards could not be loaded. Check your connection and reload.');
+      }
     );
     return () => unsubscribe();
   }, []);
@@ -1184,24 +1174,29 @@ function AdminPage({
 
   const updateRewardDraft = (field, value) => {
     setLoyaltySaveStatus('');
-    setRewardDraft((current) => ({ ...current, [field]: value }));
+    setRewardSaveError('');
+    setRewardDraft((current) => current ? { ...current, [field]: value } : current);
   };
 
   const handleEditReward = (reward) => {
     setLoyaltySaveStatus('');
+    setRewardSaveError('');
     setRewardDraft(createRewardDraft(reward));
   };
 
   const handleAddReward = () => {
     setLoyaltySaveStatus('');
+    setRewardSaveError('');
     setRewardDraft(createRewardDraft());
   };
 
   const handleSaveReward = async (event) => {
     event.preventDefault();
-    if (loyaltySaving || !rewardDraft) return;
+    if (rewardActionInFlightRef.current || !rewardDraft) return false;
 
+    rewardActionInFlightRef.current = true;
     setLoyaltySaving(true);
+    setRewardSaveError('');
     setLoyaltySaveStatus('Saving reward milestone...');
     try {
       const rewardId = rewardDraft.id || createLoyaltyRewardId();
@@ -1209,7 +1204,7 @@ function AdminPage({
       const nextReward = {
         ...rewardDraft,
         id: rewardId,
-        sortOrder: rewardDraft.sortOrder || currentRewards.length + 1,
+        sortOrder: rewardDraft.sortOrder ?? currentRewards.length + 1,
       };
       const nextRewards = currentRewards.some((reward) => reward.id === rewardId)
         ? currentRewards.map((reward) => (reward.id === rewardId ? nextReward : reward))
@@ -1220,19 +1215,24 @@ function AdminPage({
         rewards: nextRewards,
       });
       setLoyaltyProgram(savedProgram);
-      setRewardDraft(null);
       setLoyaltySaveStatus('Reward milestone saved. Customer profiles update automatically.');
+      return true;
     } catch (error) {
       console.error('Failed to save loyalty reward', error);
       setLoyaltySaveStatus(error?.message || 'The reward milestone could not be saved.');
+      setRewardSaveError(error?.message || 'The reward milestone could not be saved.');
+      return false;
     } finally {
+      rewardActionInFlightRef.current = false;
       setLoyaltySaving(false);
     }
   };
 
   const handleToggleReward = async (reward) => {
-    if (loyaltySaving) return;
-    if (reward.active && !window.confirm(`Deactivate "${reward.name}"? Existing customer reward history will be preserved.`)) return;
+    if (rewardActionInFlightRef.current) return;
+    const action = reward.active ? 'Deactivate' : 'Activate';
+    if (!window.confirm(`${action} "${reward.name}"? This may change customer reward eligibility. Existing completed visits and reward history will be preserved.`)) return;
+    rewardActionInFlightRef.current = true;
     setLoyaltySaving(true);
     setLoyaltySaveStatus('Updating reward status...');
     try {
@@ -1245,12 +1245,14 @@ function AdminPage({
     } catch (error) {
       setLoyaltySaveStatus(error?.message || 'The reward status could not be updated.');
     } finally {
+      rewardActionInFlightRef.current = false;
       setLoyaltySaving(false);
     }
   };
 
   const handleInstallSuggestedRewards = async () => {
-    if (loyaltySaving) return;
+    if (rewardActionInFlightRef.current) return;
+    rewardActionInFlightRef.current = true;
     setLoyaltySaving(true);
     setLoyaltySaveStatus('Creating suggested reward milestones...');
     try {
@@ -1261,6 +1263,7 @@ function AdminPage({
       console.error('Failed to create suggested loyalty rewards', error);
       setLoyaltySaveStatus(error?.message || 'Suggested rewards could not be created.');
     } finally {
+      rewardActionInFlightRef.current = false;
       setLoyaltySaving(false);
     }
   };
@@ -1329,7 +1332,7 @@ function AdminPage({
   ];
 
   return (
-    <div className={cx('adm-shell', sidebarCollapsed && 'adm-shell--collapsed')}>
+    <div className={cx('adm-shell', sidebarCollapsed && 'adm-shell--collapsed', activeTab === 'rewards' && 'adm-shell--rewards')}>
       {/* ---------------- Sidebar ---------------- */}
       <aside className={cx('adm-sidebar', mobileNavOpen && 'adm-sidebar--open')}>
         <div className="adm-sidebar-top">
@@ -1981,6 +1984,28 @@ function AdminPage({
             <>
               {activeTab === 'rewards' && (
               <>
+              <RewardManagementList
+                rewards={loyaltyProgram?.rewards || []}
+                loading={loyaltyLoading}
+                saving={loyaltySaving}
+                loadError={loyaltyLoadError}
+                onAdd={handleAddReward}
+                onEdit={handleEditReward}
+                onToggle={handleToggleReward}
+                onInstallSuggested={handleInstallSuggestedRewards}
+              />
+              {loyaltySaveStatus ? <p className="adm-loyalty-save-status" role="status">{loyaltySaveStatus}</p> : null}
+              {rewardDraft ? <RewardEditorModal
+                draft={rewardDraft}
+                rewards={loyaltyProgram?.rewards || []}
+                saving={loyaltySaving}
+                error={rewardSaveError}
+                onChange={updateRewardDraft}
+                onSave={handleSaveReward}
+                onClose={() => setRewardDraft(null)}
+              /> : null}
+              <details className="adm-reward-activity">
+                <summary>Customer reward activity</summary>
               <section className="adm-stat-grid adm-rewards-stat-grid" aria-label="Reward summary">
                 <article className="adm-stat-card">
                   <span className="adm-stat-icon">{I('gift', 19)}</span>
@@ -1995,151 +2020,6 @@ function AdminPage({
                   <div><span className="adm-stat-label">Total rewards claimed</span><strong className="adm-stat-value">{userLoading ? '…' : totalRewardsClaimed}</strong></div>
                 </article>
               </section>
-
-              <section className="adm-panel adm-loyalty-settings-panel">
-                <div className="adm-panel-head adm-panel-head--space-between">
-                  <div>
-                    <h2>Reward management</h2>
-                    <p className="adm-panel-subtitle">Create visit milestones and manage each loyalty reward separately.</p>
-                  </div>
-                  <button className="adm-btn adm-btn--primary adm-btn--sm" type="button" onClick={handleAddReward}>
-                    {I('plus', 15)} Add reward
-                  </button>
-                </div>
-
-                {loyaltyProgram?.rewards?.length > 0 ? (
-                  <div className="adm-reward-management-list">
-                    {loyaltyProgram.rewards.map((reward) => (
-                      <article className="adm-reward-management-row" key={reward.id}>
-                        <div className="adm-reward-milestone">
-                          <strong>{reward.requiredVisits}</strong>
-                          <span>{reward.requiredVisits === 1 ? 'Visit' : 'Visits'}</span>
-                        </div>
-                        <div className="adm-reward-management-copy">
-                          <strong>{reward.name}</strong>
-                          <p>{reward.description}</p>
-                          <small>{getRewardTypeLabel(reward.rewardType)}</small>
-                        </div>
-                        <span className={cx('adm-badge', reward.active ? 'adm-badge--success' : 'adm-badge--muted')}>
-                          {reward.active ? 'Active' : 'Inactive'}
-                        </span>
-                        <button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => handleToggleReward(reward)} disabled={loyaltySaving}>
-                          {reward.active ? 'Deactivate' : 'Activate'}
-                        </button>
-                        <button className="adm-btn adm-btn--ghost adm-btn--sm" type="button" onClick={() => handleEditReward(reward)}>
-                          Edit
-                        </button>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="adm-reward-management-empty">
-                    <p>No loyalty rewards are configured yet.</p>
-                    <button
-                      className="adm-btn adm-btn--ghost"
-                      type="button"
-                      onClick={handleInstallSuggestedRewards}
-                      disabled={loyaltySaving}
-                    >
-                      Create suggested 5, 10, 15, and 20 visit rewards
-                    </button>
-                  </div>
-                )}
-
-                {rewardDraft ? (
-                <form className="adm-loyalty-settings-form adm-reward-editor" onSubmit={handleSaveReward}>
-                  <div className="adm-reward-editor-head">
-                    <div>
-                      <strong>{rewardDraft.id ? 'Edit reward milestone' : 'Add reward milestone'}</strong>
-                      <p>Deactivating a reward hides it from the current ladder without deleting customer claim history.</p>
-                    </div>
-                    <button className="adm-icon-btn" type="button" onClick={() => setRewardDraft(null)} aria-label="Close reward editor">
-                      {I('x', 16)}
-                    </button>
-                  </div>
-                  <div className="adm-loyalty-settings-grid">
-                    <label className="adm-field adm-loyalty-reward-name">
-                      <span>Reward name</span>
-                      <input
-                        value={rewardDraft.name}
-                        onChange={(event) => updateRewardDraft('name', event.target.value)}
-                        maxLength="100"
-                        placeholder="10% Off Next Service"
-                        required
-                      />
-                    </label>
-                    <label className="adm-field">
-                      <span>Required visits</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="1000"
-                        step="1"
-                        value={rewardDraft.requiredVisits}
-                        onChange={(event) => updateRewardDraft('requiredVisits', event.target.value)}
-                        required
-                      />
-                    </label>
-                    <label className="adm-field adm-loyalty-description">
-                      <span>Description</span>
-                      <textarea
-                        rows="3"
-                        value={rewardDraft.description}
-                        onChange={(event) => updateRewardDraft('description', event.target.value)}
-                        maxLength="240"
-                        placeholder="Enjoy this reward on your next eligible appointment."
-                        required
-                      />
-                    </label>
-                    <label className="adm-field">
-                      <span>Reward type</span>
-                      <select
-                        value={rewardDraft.rewardType}
-                        onChange={(event) => updateRewardDraft('rewardType', event.target.value)}
-                      >
-                        {LOYALTY_REWARD_TYPES.map((type) => (
-                          <option key={type.value} value={type.value}>{type.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                    {rewardTypeNeedsValue(rewardDraft.rewardType) ? (
-                      <label className="adm-field">
-                        <span>{rewardDraft.rewardType === 'percentage_discount' ? 'Discount percentage' : 'Discount value (₱)'}</span>
-                        <input
-                          type="number"
-                          min="1"
-                          max={rewardDraft.rewardType === 'percentage_discount' ? '100' : '1000000'}
-                          step="1"
-                          value={rewardDraft.value}
-                          onChange={(event) => updateRewardDraft('value', event.target.value)}
-                          required
-                        />
-                      </label>
-                    ) : null}
-                    <label className="adm-field">
-                      <span>Status</span>
-                      <select
-                        value={rewardDraft.active ? 'active' : 'inactive'}
-                        onChange={(event) => updateRewardDraft('active', event.target.value === 'active')}
-                      >
-                        <option value="active">Active</option>
-                        <option value="inactive">Inactive</option>
-                      </select>
-                    </label>
-                  </div>
-                  <div className="adm-form-actions">
-                    <button className="adm-btn adm-btn--primary" type="submit" disabled={loyaltySaving}>
-                      {loyaltySaving ? 'Saving...' : 'Save reward'}
-                    </button>
-                    <button className="adm-btn adm-btn--ghost" type="button" onClick={() => setRewardDraft(null)} disabled={loyaltySaving}>
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-                ) : null}
-                {loyaltySaveStatus ? <p className="adm-loyalty-save-status" role="status">{loyaltySaveStatus}</p> : null}
-              </section>
-
               <div className="adm-two-col adm-rewards-insights">
                 <section className="adm-panel">
                   <div className="adm-panel-head adm-panel-head--space-between">
@@ -2201,6 +2081,7 @@ function AdminPage({
                   )}
                 </section>
               </div>
+              </details>
               </>
               )}
 
