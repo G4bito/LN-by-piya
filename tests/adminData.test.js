@@ -21,12 +21,15 @@ test('admin navigation keeps Customers and Rewards as separate destinations', ()
     'overview',
     'portfolio',
     'bookings',
+    'availability',
     'users',
     'rewards',
     'settings',
   ]);
   assert.equal(ADMIN_PAGE_TITLES.users.title, 'Customers');
   assert.equal(ADMIN_PAGE_TITLES.rewards.title, 'Loyalty Rewards');
+  assert.equal(ADMIN_PAGE_TITLES.availability.title, 'Availability');
+  assert.equal(ADMIN_PAGE_TITLES.settings.title, 'Settings');
   assert.notEqual(ADMIN_PAGE_TITLES.users.subtitle, ADMIN_PAGE_TITLES.rewards.subtitle);
 });
 

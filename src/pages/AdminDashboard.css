@@ -1444,6 +1444,87 @@
   gap: 0.35rem;
 }
 
+/* Booking availability shares the existing settings palette and controls. */
+.adm-availability { scroll-margin-top: 1.5rem; min-width: 0; }
+.adm-availability-layout { display: grid; grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.2fr); gap: 2rem; }
+.adm-availability-calendar, .adm-availability-editor { min-width: 0; }
+.adm-availability-month { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 1rem; }
+.adm-availability h3 { margin: 0; color: var(--gold-light, #e9d4a8); font-family: 'Playfair Display', serif; font-size: 1.15rem; }
+.adm-availability-month .adm-btn { min-width: 38px; padding: 0.45rem; }
+.adm-availability-weekdays, .adm-availability-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.35rem; }
+.adm-availability-weekdays { text-align: center; color: var(--gold-deep, #9c7b3f); font-size: 0.65rem; margin-bottom: 0.5rem; }
+.adm-availability-date { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.4rem; min-width: 0; min-height: 48px; border: 1px solid var(--line-soft, rgba(201,168,118,.14)); border-radius: 8px; background: #17130f; color: var(--cream, #f4ead9); cursor: pointer; font: inherit; transition: background .15s, border-color .15s; }
+.adm-availability-date:hover { border-color: var(--gold, #c9a876); background: #241d14; }
+.adm-availability-date.is-selected { border-color: var(--gold, #c9a876); background: rgba(201,168,118,.16); box-shadow: inset 0 0 0 1px var(--gold, #c9a876); }
+.adm-availability-date:focus-visible, .adm-availability button:focus-visible { outline: 2px solid var(--gold-light, #e9d4a8); outline-offset: 3px; }
+.adm-availability-date:disabled { opacity: .5; cursor: wait; }
+.adm-availability-date i, .adm-availability-legend i { display: inline-block; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: currentColor; }
+.adm-availability-date.is-open i, .adm-availability-legend .is-open, .adm-calendar-availability.is-open { color: #9acda7; }
+.adm-availability-date.is-closed i, .adm-availability-legend .is-closed, .adm-calendar-availability.is-closed { color: #d99186; }
+.adm-availability-date.is-custom i, .adm-availability-legend .is-custom, .adm-calendar-availability.is-custom { color: #e9cc91; }
+.adm-availability-date.is-full i, .adm-availability-legend .is-full, .adm-calendar-availability.is-full { color: #b1a4c8; }
+.adm-availability-legend { display: flex; flex-wrap: wrap; gap: 0.6rem 0.9rem; margin-top: 1rem; font-size: .65rem; }
+.adm-availability-legend > span { display: inline-flex; align-items: center; gap: .35rem; }
+.adm-availability-editor { display: flex; flex-direction: column; gap: 1rem; }
+.adm-availability-editor > .adm-panel-subtitle { margin: 0; line-height: 1.6; }
+.adm-availability-ranges { display: grid; gap: .7rem; min-width: 0; margin: 0; padding: 1rem; border: 1px solid var(--line-soft, rgba(201,168,118,.14)); border-radius: 10px; }
+.adm-availability-ranges legend { color: var(--gold-light, #e9d4a8); padding: 0 .35rem; font-size: .8rem; }
+.adm-availability-range { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: .6rem; align-items: end; }
+.adm-availability-range input { min-width: 0; width: 100%; color-scheme: dark; }
+.adm-availability-range .adm-btn { min-height: 40px; }
+.adm-availability-range .adm-field { min-width: 0; }
+.adm-availability-note, .adm-availability-timezone, .adm-availability-warning, .adm-availability-error, .adm-availability-success { font-size: .78rem; line-height: 1.6; margin: 0; overflow-wrap: anywhere; }
+.adm-availability-note, .adm-availability-timezone { color: rgba(244,234,217,.65); }
+.adm-availability-warning { color: #f4d38d; background: rgba(201,168,118,.08); padding: .75rem; border-radius: 8px; border: 1px solid var(--line-soft, rgba(201,168,118,.14)); }
+.adm-availability-error { color: #ffaaa0; }
+.adm-availability-success { color: #a9dfaf; }
+.adm-availability .adm-form-actions { margin-top: 0; }
+.adm-availability-dialog { width: min(90vw, 480px); max-height: 85dvh; overflow-y: auto; padding: 1.5rem; background: #17130f; color: var(--cream, #f4ead9); border: 1px solid var(--gold-deep, #9c7b3f); border-radius: 14px; }
+.adm-availability-dialog::backdrop { background: rgba(0,0,0,.75); }
+.adm-availability-dialog p { font-size: .85rem; line-height: 1.7; }
+.adm-calendar-availability { display: block; font-size: .62rem; margin-top: .4rem; }
+.adm-settings-compact { display: grid; gap: 1rem; min-width: 0; }
+.adm-settings-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+.adm-settings-group { min-width: 0; padding: 1.25rem; }
+.adm-settings-group h2 { margin: 0 0 1rem; font-size: 1.1rem; color: var(--gold-light, #e9d4a8); font-family: 'Playfair Display', serif; }
+.adm-settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; align-items: end; }
+.adm-settings-fields > *, .adm-settings-policy-fields > * { min-width: 0; }
+.adm-settings-compact input:not([type='checkbox']), .adm-settings-compact select { width: 100%; min-width: 0; height: 42px; }
+.adm-settings-compact textarea { min-width: 0; width: 100%; }
+.adm-settings-disclosure { border-top: 1px solid var(--line-soft, rgba(201,168,118,.14)); padding: .85rem 0; }
+.adm-settings-disclosure:first-of-type { border-top: 0; padding-top: 0; }
+.adm-settings-disclosure summary, .adm-settings-advanced > summary { cursor: pointer; color: var(--gold-light, #e9d4a8); font-size: .82rem; line-height: 1.6; }
+.adm-settings-disclosure[open] > summary { margin-bottom: .9rem; }
+.adm-settings-disclosure summary:focus-visible, .adm-settings-advanced > summary:focus-visible { outline: 2px solid var(--gold, #c9a876); outline-offset: 4px; }
+.adm-compact-hours { display: grid; gap: .6rem; }
+.adm-compact-hours-row { display: grid; grid-template-columns: minmax(68px, .8fr) repeat(2, minmax(0, 1fr)); gap: .5rem; align-items: center; }
+.adm-compact-hours-row .adm-toggle-field { gap: .4rem; font-size: .75rem; }
+.adm-settings-compact .adm-compact-hours input[type='time'] { padding: .5rem .35rem; font-size: .76rem; color-scheme: dark; }
+.adm-settings-policy-fields { display: grid; gap: .8rem; }
+.adm-settings-advanced { padding: 1rem 1.25rem; }
+.adm-settings-advanced > summary span { color: rgba(244,234,217,.55); margin-left: .6rem; font-size: .72rem; }
+.adm-settings-advanced[open] > summary { margin-bottom: 1rem; }
+.adm-settings-eligible { grid-column: 1 / -1; border: 0; padding: 0; margin: 0; display: grid; gap: .6rem; }
+.adm-settings-eligible legend { margin-bottom: .65rem; font-size: .75rem; color: var(--gold-light, #e9d4a8); }
+.adm-settings-compact .adm-settings-savebar { position: static; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem; margin: 0; padding: 1rem 1.25rem; }
+.adm-settings-compact .adm-settings-savebar strong { font-size: .8rem; }
+.adm-settings-compact .adm-settings-savebar span { margin-top: .3rem; font-size: .75rem; }
+.adm-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.adm-availability-appointments { border-top: 1px solid var(--line-soft, rgba(201,168,118,.14)); padding-top: 1rem; }
+.adm-availability-appointments h4 { margin: 0 0 .75rem; font-size: .85rem; color: var(--gold-light, #e9d4a8); }
+.adm-availability-appointments ul, .adm-availability-closures ul { margin: 0; padding: 0; list-style: none; }
+.adm-availability-appointments li { display: flex; justify-content: space-between; align-items: center; gap: .75rem; padding: .75rem 0; border-bottom: 1px solid var(--line-soft, rgba(201,168,118,.14)); }
+.adm-availability-appointments li > div { min-width: 0; }
+.adm-availability-appointments strong, .adm-availability-appointments span, .adm-availability-appointments small { display: block; font-size: .76rem; line-height: 1.7; overflow-wrap: anywhere; }
+.adm-availability-appointments span, .adm-availability-appointments small { color: rgba(244,234,217,.65); }
+.adm-availability-closures { margin-top: 1.5rem; }
+.adm-availability-closures li button { display: block; width: 100%; text-align: left; padding: .6rem 0; background: none; border: 0; color: var(--cream, #f4ead9); cursor: pointer; }
+.adm-availability-closures li small { display: block; color: rgba(244,234,217,.55); margin-top: .25rem; }
+@media (max-width: 980px) { .adm-settings-sections { grid-template-columns: 1fr; } }
+@media (max-width: 480px) { .adm-settings-group { padding: 1rem; } .adm-settings-fields { grid-template-columns: 1fr; } .adm-settings-advanced > summary span { display: block; margin: .35rem 0 0; } .adm-settings-compact .adm-settings-savebar .adm-btn { width: 100%; } }
+@media (max-width: 1100px) { .adm-availability-layout { grid-template-columns: 1fr; gap: 1.5rem; } .adm-availability-calendar { max-width: 500px; width: 100%; } }
+@media (max-width: 420px) { .adm-availability-range { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .adm-availability-range .adm-btn { grid-column: 1 / -1; justify-self: end; } .adm-availability-ranges { padding: .7rem; } .adm-availability-weekdays { font-size: .6rem; } .adm-availability-date { min-height: 44px; } .adm-availability-dialog .adm-btn { width: 100%; } }
+
 .adm-user-cell {
   display: flex;
   align-items: center;

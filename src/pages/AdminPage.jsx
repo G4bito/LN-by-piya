@@ -14,6 +14,7 @@ import {
   markAllAdminNotificationsRead,
   saveLoyaltyProgram,
   saveBusinessSettings,
+  saveBookingAvailability,
   reviewAppointmentChangeRequest,
   syncConfirmedScheduleSlots,
   updateBookingStatus,
@@ -38,12 +39,16 @@ import {
 import { DEFAULT_LOYALTY_REWARDS, LOYALTY_REWARD_TYPES } from '../loyaltyProgram';
 import { formatFileSize } from '../imageUploadConfig';
 import {
-  BUSINESS_WEEKDAYS,
   DEFAULT_BUSINESS_SETTINGS,
   getBusinessSettingsPatch,
   normalizeBusinessSettings,
+  validateBusinessSettingsPatch,
 } from '../businessSettings';
 import { SCHEDULE_CONFLICT_CODE } from '../scheduling';
+import { getDateKeyInTimeZone } from '../businessSettings';
+import { getDateAvailability, isAppointmentWithinAvailability } from '../../functions/shared/availability.js';
+import BookingAvailabilityManager from '../components/BookingAvailabilityManager';
+import AdminSettings from '../components/AdminSettings';
 import './AdminDashboard.css';
 
 /* ============================================================
@@ -332,9 +337,13 @@ function AdminPage({
   onToggleUserStatus,
   onDeleteUser,
   businessSettings: businessSettingsProp,
+  businessSettingsLoading = false,
+  businessSettingsError = '',
 }) {
   /* ---------------- shell / navigation state ---------------- */
   const [activeTab, setActiveTab] = useState('overview');
+  const [availabilityDate, setAvailabilityDate] = useState(() => getDateKeyInTimeZone(new Date(), businessSettingsProp?.timezone));
+  const previousSettingsRef = useRef(normalizeBusinessSettings(businessSettingsProp));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -419,7 +428,6 @@ function AdminPage({
   const [settingsDraft, setSettingsDraft] = useState(() => normalizeBusinessSettings(businessSettingsProp));
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState('');
-  const [blackoutDraft, setBlackoutDraft] = useState({ date: '', reason: '' });
   const rewardClaimInFlightRef = useRef(false);
   const salonTimeZone = businessSettings.timezone || DEFAULT_BUSINESS_SETTINGS.timezone;
 
@@ -488,8 +496,10 @@ function AdminPage({
 
   useEffect(() => {
     const nextSettings = normalizeBusinessSettings(businessSettingsProp);
+    const previousSettings = previousSettingsRef.current;
     setBusinessSettings(nextSettings);
-    setSettingsDraft(nextSettings);
+    setSettingsDraft((current) => ({ ...nextSettings, ...getBusinessSettingsPatch(previousSettings, current) }));
+    previousSettingsRef.current = nextSettings;
   }, [businessSettingsProp]);
 
   useEffect(() => {
@@ -517,7 +527,7 @@ function AdminPage({
     soundEnabledRef.current = soundEnabled;
   }, [soundEnabled]);
 
-  const today = useMemo(() => new Date(), []);
+  const today = useMemo(() => new Date(`${getDateKeyInTimeZone(new Date(), salonTimeZone)}T12:00:00`), [salonTimeZone]);
   const todayKey = getLocalDateKey(today);
   const weekDates = useMemo(() => buildWeekDates(today), [today]);
   const weekKeys = useMemo(() => weekDates.map((date) => getLocalDateKey(date)), [weekDates]);
@@ -551,8 +561,9 @@ function AdminPage({
       (data) => {
         if (!mounted) return;
         setBookings(data);
+        setBackendError('');
         const scheduleSignature = data
-          .filter((booking) => ['confirmed', 'completed', 'cancelled', 'canceled', 'declined', 'no show', 'no-show'].includes(String(booking.status || '').trim().toLowerCase()))
+          .filter((booking) => ['pending confirmation', 'confirmed', 'completed', 'cancelled', 'canceled', 'declined', 'no show', 'no-show'].includes(String(booking.status || '').trim().toLowerCase()))
           .map((booking) => `${booking.id}:${booking.status}:${booking.date}:${booking.time}:${booking.service}`)
           .sort()
           .join('|');
@@ -632,9 +643,9 @@ function AdminPage({
     () => weekDates.map((date) => {
       const key = getLocalDateKey(date);
       const count = visibleBookings.filter((booking) => booking.date === key && !isCancelledBooking(booking)).length;
-      return { key, label: formatCalendarLabel(date), count };
+      return { key, label: formatCalendarLabel(date), count, availability: getDateAvailability(key, businessSettings, visibleBookings, new Date()) };
     }),
-    [visibleBookings, weekDates]
+    [visibleBookings, weekDates, businessSettings]
   );
 
   const upcomingBookings = visibleBookings.filter((booking) => (
@@ -930,9 +941,9 @@ function AdminPage({
   };
 
   const handleCalendarDayClick = (dateKey) => {
-    setSelectedAppointmentDate(dateKey);
-    setBookingStatusFilter('All');
-    setActiveTab('bookings');
+    setAvailabilityDate(dateKey);
+    setActiveTab('availability');
+    requestAnimationFrame(() => document.getElementById('booking-availability')?.scrollIntoView({ block: 'start' }));
   };
 
   const handleStatCardClick = (label) => {
@@ -958,6 +969,11 @@ function AdminPage({
   const handleSaveSettings = async (event) => {
     event.preventDefault();
     if (settingsSaving) return;
+    const validationErrors = validateBusinessSettingsPatch(settingsDraft);
+    if (validationErrors.length) {
+      setSettingsStatus(validationErrors[0]);
+      return;
+    }
     const nextSettings = normalizeBusinessSettings(settingsDraft);
     const changedSettings = getBusinessSettingsPatch(businessSettings, nextSettings);
     if (!Object.keys(changedSettings).length) {
@@ -1047,24 +1063,6 @@ function AdminPage({
       },
     }));
     setSettingsStatus('');
-  };
-
-  const handleAddBlackoutDate = () => {
-    if (!blackoutDraft.date) {
-      setSettingsStatus('Choose a blackout date first.');
-      return;
-    }
-    updateSettingsField('blackoutDates', {
-      ...settingsDraft.blackoutDates,
-      [blackoutDraft.date]: { date: blackoutDraft.date, reason: blackoutDraft.reason.trim() },
-    });
-    setBlackoutDraft({ date: '', reason: '' });
-  };
-
-  const handleRemoveBlackoutDate = (date) => {
-    const nextDates = { ...settingsDraft.blackoutDates };
-    delete nextDates[date];
-    updateSettingsField('blackoutDates', nextDates);
   };
 
   const handleNailArtEligibilityChange = (serviceId, enabled) => {
@@ -1496,11 +1494,12 @@ function AdminPage({
                       type="button"
                       className={cx('adm-calendar-day', day.key === todayKey && 'adm-calendar-day--today')}
                       onClick={() => handleCalendarDayClick(day.key)}
-                      aria-label={`View ${day.count} appointment${day.count === 1 ? '' : 's'} on ${day.label}`}
+                      aria-label={`Manage availability on ${day.label}: ${day.availability.label}, ${day.count} booked`}
                     >
-                      <span>{DAY_NAMES[new Date(day.key).getDay()]}</span>
+                      <span>{DAY_NAMES[new Date(`${day.key}T12:00:00`).getDay()]}</span>
                       <strong>{day.label}</strong>
                       <div className="adm-calendar-count">{day.count} booked</div>
+                      <small className={`adm-calendar-availability is-${day.availability.status}`}>{day.availability.label}</small>
                     </button>
                   ))}
                 </div>
@@ -1847,6 +1846,7 @@ function AdminPage({
                                 {bookedOn ? `Booked ${bookedOn}` : 'Booked date unavailable'}
                               </small>
                               {hasConflict ? <small className="adm-conflict-label">Scheduling conflict</small> : null}
+                              {['Pending Confirmation', 'Confirmed'].includes(normalizedStatus) && !isAppointmentWithinAvailability(booking, businessSettings) ? <small className="adm-conflict-label">Outside available hours · Review needed</small> : null}
                             </td>
                             <td><strong className="adm-booking-total">{formatPeso(getBookingTotal(booking))}</strong></td>
                             <td>
@@ -1925,6 +1925,7 @@ function AdminPage({
                           {getNailArtSummary(booking) ? <small className="adm-booking-customization">{getNailArtSummary(booking)}</small> : null}
                           {pendingRequest ? <small className="adm-request-indicator">{pendingRequest.type === 'cancellation' ? 'Cancellation requested' : 'Reschedule requested'}</small> : null}
                           {hasConflict ? <small className="adm-conflict-label">Scheduling conflict</small> : null}
+                          {['Pending Confirmation', 'Confirmed'].includes(normalizedStatus) && !isAppointmentWithinAvailability(booking, businessSettings) ? <small className="adm-conflict-label">Outside available hours · Review needed</small> : null}
                           <footer className="adm-appointment-card-actions">
                             {normalizedStatus === 'Pending Confirmation' ? (
                               <>
@@ -1948,108 +1949,33 @@ function AdminPage({
             </>
           )}
 
-          {activeTab === 'settings' && (
-            <form className="adm-settings-layout" onSubmit={handleSaveSettings}>
-              <section className="adm-panel adm-settings-intro">
-                <div className="adm-panel-head">
-                  <div><span className="adm-settings-kicker">Business control center</span><h2>Settings</h2></div>
-                  <p className="adm-panel-subtitle">Changes saved here update the customer website and booking rules from one shared Firebase record.</p>
-                </div>
-              </section>
-
-              <section className="adm-panel">
-                <div className="adm-panel-head"><h2>1. Business information</h2><p className="adm-panel-subtitle">Public salon details used on the website and in customer communication.</p></div>
-                <div className="adm-settings-grid">
-                  {[
-                    ['businessName', 'Business name'], ['phone', 'Phone number'], ['email', 'Email'], ['address', 'Address'],
-                    ['facebookUrl', 'Facebook URL'], ['instagramUrl', 'Instagram URL'], ['timezone', 'Business timezone'],
-                  ].map(([field, label]) => <label className="adm-field" key={field}><span>{label}</span><input value={settingsDraft[field] || ''} onChange={(event) => updateSettingsField(field, event.target.value)} /></label>)}
-                  <label className="adm-field adm-settings-wide"><span>Tagline or short description</span><textarea rows="2" maxLength="240" value={settingsDraft.tagline} onChange={(event) => updateSettingsField('tagline', event.target.value)} /></label>
-                </div>
-              </section>
-
-              <section className="adm-panel">
-                <div className="adm-panel-head"><h2>2. Business hours</h2><p className="adm-panel-subtitle">These hours appear on the customer website and limit appointment availability.</p></div>
-                <div className="adm-hours-table">
-                  {BUSINESS_WEEKDAYS.map((day) => {
-                    const hours = settingsDraft.businessHours[day.key];
-                    return <div className="adm-hours-row" key={day.key}><strong>{day.label}</strong><label className="adm-toggle-field"><input type="checkbox" checked={hours.open} onChange={(event) => updateWeeklyHours('businessHours', day.key, 'open', event.target.checked)} /><span>{hours.open ? 'Open' : 'Closed'}</span></label><label className="adm-field"><span>Opens</span><input type="time" disabled={!hours.open} value={hours.openTime} onChange={(event) => updateWeeklyHours('businessHours', day.key, 'openTime', event.target.value)} /></label><label className="adm-field"><span>Closes</span><input type="time" disabled={!hours.open} value={hours.closeTime} onChange={(event) => updateWeeklyHours('businessHours', day.key, 'closeTime', event.target.value)} /></label></div>;
-                  })}
-                </div>
-              </section>
-
-              <section className="adm-panel">
-                <div className="adm-panel-head"><h2>3. Blackout dates</h2><p className="adm-panel-subtitle">Block holidays, personal leave, or other dates when appointments cannot be booked.</p></div>
-                <div className="adm-blackout-editor">
-                  <label className="adm-field"><span>Date</span><input type="date" value={blackoutDraft.date} onChange={(event) => setBlackoutDraft((current) => ({ ...current, date: event.target.value }))} /></label>
-                  <label className="adm-field"><span>Reason (optional)</span><input maxLength="120" placeholder="Holiday or salon closure" value={blackoutDraft.reason} onChange={(event) => setBlackoutDraft((current) => ({ ...current, reason: event.target.value }))} /></label>
-                  <button className="adm-btn adm-btn--ghost" type="button" onClick={handleAddBlackoutDate}>Add date</button>
-                </div>
-                <div className="adm-blackout-list">
-                  {Object.values(settingsDraft.blackoutDates).sort((left, right) => left.date.localeCompare(right.date)).map((entry) => <div className="adm-blackout-item" key={entry.date}><div><strong>{formatDate(entry.date)}</strong><span>{entry.reason || 'Closed'}</span></div><button className="adm-btn adm-btn--danger adm-btn--sm" type="button" onClick={() => handleRemoveBlackoutDate(entry.date)}>Remove</button></div>)}
-                  {!Object.keys(settingsDraft.blackoutDates).length ? <p className="adm-empty-copy">No blackout dates configured.</p> : null}
-                </div>
-              </section>
-
-              <section className="adm-panel">
-                <div className="adm-panel-head"><h2>4. Booking settings</h2><p className="adm-panel-subtitle">Control how far ahead customers book and how much space each appointment needs.</p></div>
-                <div className="adm-settings-grid">
-                  <label className="adm-field"><span>Booking interval (minutes)</span><input type="number" min="5" max="240" step="5" value={settingsDraft.bookingInterval} onChange={(event) => updateSettingsField('bookingInterval', event.target.value)} /></label>
-                  <label className="adm-field"><span>Minimum notice (hours)</span><input type="number" min="0" max="720" step="1" value={settingsDraft.minimumNoticeHours} onChange={(event) => updateSettingsField('minimumNoticeHours', event.target.value)} /></label>
-                  <label className="adm-field"><span>Maximum advance booking (days)</span><input type="number" min="1" max="730" step="1" value={settingsDraft.maximumAdvanceDays} onChange={(event) => updateSettingsField('maximumAdvanceDays', event.target.value)} /></label>
-                  <label className="adm-field"><span>Buffer between appointments (minutes)</span><input type="number" min="0" max="240" step="5" value={settingsDraft.appointmentBufferMinutes} onChange={(event) => updateSettingsField('appointmentBufferMinutes', event.target.value)} /></label>
-                  <label className="adm-field"><span>Maximum appointments per day</span><input type="number" min="1" max="100" step="1" value={settingsDraft.maximumAppointmentsPerDay} onChange={(event) => updateSettingsField('maximumAppointmentsPerDay', event.target.value)} /></label>
-                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.allowSameDayBooking} onChange={(event) => updateSettingsField('allowSameDayBooking', event.target.checked)} /><span>Allow same-day booking</span></label>
-                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.allowCustomerCancellation} onChange={(event) => updateSettingsField('allowCustomerCancellation', event.target.checked)} /><span>Allow customer cancellation requests online</span></label>
-                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.requireAdminApprovalForCancellation} disabled={!settingsDraft.allowCustomerCancellation} onChange={(event) => updateSettingsField('requireAdminApprovalForCancellation', event.target.checked)} /><span>Require Admin approval for cancellation <small>Recommended: keep this on so the appointment remains confirmed until you decide.</small></span></label>
-                  <label className="adm-field"><span>Cancellation deadline (hours)</span><input type="number" min="0" max="720" value={settingsDraft.cancellationDeadlineHours} disabled={!settingsDraft.allowCustomerCancellation} onChange={(event) => updateSettingsField('cancellationDeadlineHours', event.target.value)} /></label>
-                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.allowCustomerReschedule} onChange={(event) => updateSettingsField('allowCustomerReschedule', event.target.checked)} /><span>Allow customer reschedule requests online</span></label>
-                  <label className="adm-field"><span>Reschedule deadline (hours)</span><input type="number" min="0" max="720" value={settingsDraft.rescheduleDeadlineHours} disabled={!settingsDraft.allowCustomerReschedule} onChange={(event) => updateSettingsField('rescheduleDeadlineHours', event.target.value)} /></label>
-                </div>
-              </section>
-
-              <section className="adm-panel">
-                <div className="adm-panel-head"><h2>5. Online booking hours</h2><p className="adm-panel-subtitle">Use narrower hours here when online appointments should differ from business hours.</p></div>
-                <div className="adm-hours-table">
-                  {BUSINESS_WEEKDAYS.map((day) => {
-                    const hours = settingsDraft.onlineBookingHours[day.key];
-                    return <div className="adm-hours-row" key={day.key}><strong>{day.label}</strong><label className="adm-toggle-field"><input type="checkbox" checked={hours.open} onChange={(event) => updateWeeklyHours('onlineBookingHours', day.key, 'open', event.target.checked)} /><span>{hours.open ? 'Available' : 'Closed'}</span></label><label className="adm-field"><span>Starts</span><input type="time" disabled={!hours.open} value={hours.openTime} onChange={(event) => updateWeeklyHours('onlineBookingHours', day.key, 'openTime', event.target.value)} /></label><label className="adm-field"><span>Ends</span><input type="time" disabled={!hours.open} value={hours.closeTime} onChange={(event) => updateWeeklyHours('onlineBookingHours', day.key, 'closeTime', event.target.value)} /></label></div>;
-                  })}
-                </div>
-              </section>
-
-              <section className="adm-panel">
-                <div className="adm-panel-head"><h2>6. Nail service settings</h2><p className="adm-panel-subtitle">Configure Nail Art pricing and booking reference uploads without changing code.</p></div>
-                <div className="adm-settings-grid">
-                  <label className="adm-field"><span>Nail Art price per nail (₱)</span><input type="number" min="0" max="10000" step="1" value={settingsDraft.nailArtPricePerNail} onChange={(event) => updateSettingsField('nailArtPricePerNail', event.target.value)} /></label>
-                  <label className="adm-field"><span>Maximum Nail Art quantity</span><input type="number" min="1" max="10" step="1" value={settingsDraft.maximumNailArtQuantity} onChange={(event) => updateSettingsField('maximumNailArtQuantity', event.target.value)} /></label>
-                  <label className="adm-toggle-field"><input type="checkbox" checked={settingsDraft.allowReferencePhoto} onChange={(event) => updateSettingsField('allowReferencePhoto', event.target.checked)} /><span>Allow booking reference photos</span></label>
-                  <div className="adm-settings-wide adm-settings-info"><strong>Upload limits</strong><span>Booking reference photos: 5 MB · Portfolio images: 8 MB</span><small>Limits are enforced by the app and Firebase Storage rules.</small></div>
-                  <fieldset className="adm-settings-wide adm-checklist"><legend>Nail Art eligible services</legend>{SERVICES.filter((service) => service.nailArtEligible).map((service) => <label className="adm-toggle-field" key={service.id}><input type="checkbox" checked={settingsDraft.nailArtEligibleServiceIds.includes(service.id)} onChange={(event) => handleNailArtEligibilityChange(service.id, event.target.checked)} /><span>{service.title}</span></label>)}</fieldset>
-                </div>
-              </section>
-
-              <section className="adm-panel">
-                <div className="adm-panel-head"><h2>7. Appointment policies</h2><p className="adm-panel-subtitle">Short public policies shown to customers while booking and on their profile.</p></div>
-                <div className="adm-settings-grid">
-                  {[['cancellationPolicy', 'Cancellation policy'], ['lateArrivalPolicy', 'Late arrival policy'], ['noShowPolicy', 'No-show policy'], ['appointmentPreparationNote', 'Appointment preparation note']].map(([field, label]) => <label className="adm-field adm-settings-wide" key={field}><span>{label}</span><textarea rows="3" maxLength="2000" value={settingsDraft[field]} onChange={(event) => updateSettingsField(field, event.target.value)} /></label>)}
-                </div>
-              </section>
-
-              <section className="adm-panel">
-                <div className="adm-panel-head"><h2>8. Notifications and reminders</h2><p className="adm-panel-subtitle">Choose which automated customer updates the booking workflow may send.</p></div>
-                <div className="adm-settings-toggle-grid">
-                  {[['reminder24hEnabled', '24-hour appointment reminders'], ['reminder12hEnabled', '12-hour appointment reminders'], ['inAppReminderEnabled', 'In-app reminder notifications'], ['bookingConfirmationNotificationEnabled', 'Booking confirmation notifications'], ['cancellationNotificationEnabled', 'Cancellation notifications'], ['rescheduleNotificationEnabled', 'Reschedule notifications']].map(([field, label]) => <label className="adm-toggle-field" key={field}><input type="checkbox" checked={settingsDraft[field]} onChange={(event) => updateSettingsField(field, event.target.checked)} /><span>{label}</span></label>)}
-                </div>
-              </section>
-
-              <div className="adm-settings-savebar">
-                <div><strong>Publish settings</strong><span>Only changed fields are written to Firebase.</span></div>
-                <div className="adm-form-actions"><button className="adm-btn adm-btn--primary" type="submit" disabled={settingsSaving}>{settingsSaving ? 'Saving...' : 'Save changes'}</button>{settingsStatus ? <span className="adm-inline-status" role="status">{settingsStatus}</span> : null}</div>
-              </div>
-            </form>
+          {activeTab === 'availability' && (
+            <BookingAvailabilityManager
+              settings={businessSettings}
+              bookings={visibleBookings}
+              selectedDate={availabilityDate}
+              onDateChange={setAvailabilityDate}
+              onSave={saveBookingAvailability}
+              onViewAppointment={(booking) => setSelectedBookingId(booking.id)}
+              loading={businessSettingsLoading || loading}
+              loadError={businessSettingsError || backendError}
+            />
           )}
 
+          {activeTab === 'settings' && (
+            <AdminSettings
+              settings={businessSettings}
+              draft={settingsDraft}
+              onFieldChange={updateSettingsField}
+              onHoursChange={updateWeeklyHours}
+              onNailArtChange={handleNailArtEligibilityChange}
+              onSave={handleSaveSettings}
+              saving={settingsSaving}
+              status={settingsStatus}
+              loading={businessSettingsLoading}
+              loadError={businessSettingsError}
+            />
+          )}
 
           {(activeTab === 'users' || activeTab === 'rewards') && (
             <>
@@ -2449,6 +2375,7 @@ function AdminPage({
               {bookingActionError ? <div className="adm-alert adm-alert--warning">{bookingActionError}</div> : null}
 
               <div className="adm-details-grid">
+                {['Pending Confirmation', 'Confirmed'].includes(normalizeBookingStatus(selectedBooking.status)) && !isAppointmentWithinAvailability(selectedBooking, businessSettings) ? <div className="adm-alert adm-alert--warning adm-detail-card--full">This appointment falls outside the current available hours. Review it with the client; its booking has been preserved.</div> : null}
                 <section className="adm-detail-card">
                   <h4>Customer</h4>
                   <strong>{getBookingCustomerName(selectedBooking)}</strong>

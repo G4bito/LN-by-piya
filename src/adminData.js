@@ -29,6 +29,7 @@ export const ADMIN_NAV_ITEMS = Object.freeze([
   Object.freeze({ key: 'overview', label: 'Overview', icon: 'grid' }),
   Object.freeze({ key: 'portfolio', label: 'Portfolio', icon: 'image' }),
   Object.freeze({ key: 'bookings', label: 'Appointments', icon: 'calendar' }),
+  Object.freeze({ key: 'availability', label: 'Availability', icon: 'calendar' }),
   Object.freeze({ key: 'users', label: 'Customers', icon: 'users' }),
   Object.freeze({ key: 'rewards', label: 'Rewards', icon: 'gift' }),
   Object.freeze({ key: 'settings', label: 'Settings', icon: 'settings' }),
@@ -38,9 +39,10 @@ export const ADMIN_PAGE_TITLES = Object.freeze({
   overview: Object.freeze({ title: 'Overview', subtitle: "Here's what's happening at Luxe Nails today." }),
   portfolio: Object.freeze({ title: 'Portfolio manager', subtitle: 'Curate the work shown on your public gallery.' }),
   bookings: Object.freeze({ title: 'Appointments', subtitle: "Review today's schedule and recent activity." }),
+  availability: Object.freeze({ title: 'Availability', subtitle: 'Manage open dates, custom hours, and time off.' }),
   users: Object.freeze({ title: 'Customers', subtitle: 'View customer profiles, preferences, loyalty, and appointment history.' }),
   rewards: Object.freeze({ title: 'Loyalty Rewards', subtitle: 'Create, organize, and manage customer reward milestones.' }),
-  settings: Object.freeze({ title: 'Business settings', subtitle: 'Keep the details that shape bookings and customer communication in one place.' }),
+  settings: Object.freeze({ title: 'Settings', subtitle: 'Essential salon configuration.' }),
 });
 
 export const LOYALTY_REWARD_TARGET = DEFAULT_LOYALTY_REWARDS[0].requiredVisits;
