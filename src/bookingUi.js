@@ -46,6 +46,7 @@ export function getCalendarCells(monthDate, options = {}) {
   const fullyBookedDates = options.fullyBookedDates || new Set();
   const noAvailableTimesDates = options.noAvailableTimesDates || new Set();
   const blackoutDates = options.blackoutDates || new Set();
+  const dateOverrides = options.dateOverrides || {};
   const maximumDateKey = options.maximumDateKey || '';
   const allowSameDayBooking = options.allowSameDayBooking !== false;
   const firstWeekday = new Date(year, month, 1).getDay();
@@ -58,8 +59,9 @@ export function getCalendarCells(monthDate, options = {}) {
     const isPast = key < todayKey;
     const isSameDayUnavailable = !allowSameDayBooking && key === todayKey;
     const isBeyondAdvanceWindow = Boolean(maximumDateKey && key > maximumDateKey);
-    const isClosed = closedWeekdays.has(value.getDay());
-    const isBlackout = blackoutDates.has(key);
+    const override = dateOverrides[key];
+    const isClosed = override ? override.status === 'closed' : closedWeekdays.has(value.getDay());
+    const isBlackout = !override && blackoutDates.has(key);
     const isFullyBooked = fullyBookedDates.has(key);
     const hasNoAvailableTimes = noAvailableTimesDates.has(key);
     cells.push({

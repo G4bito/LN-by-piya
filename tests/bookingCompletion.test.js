@@ -25,6 +25,7 @@ before(async () => {
   server = await createServer({
     configFile: false,
     envDir: false,
+    cacheDir: 'node_modules/.cache/loyalty-test-vite',
     server: { middlewareMode: true, ws: false, watch: null },
     optimizeDeps: { noDiscovery: true, include: [] },
     resolve: { alias: [{ find: /^firebase\//, replacement: 'fixture:firebase/' }] },
@@ -41,6 +42,7 @@ before(async () => {
         if (id === '\0fixture:firebase/app') return 'export const getApps = () => []; export const initializeApp = () => ({});';
         if (id === '\0fixture:firebase/auth') return 'export const getAuth = () => ({ currentUser: { uid: "salon-admin" } }); export class GoogleAuthProvider { setCustomParameters() {} }';
         if (id === '\0fixture:firebase/storage') return 'export const getStorage = () => ({});';
+        if (id === '\0fixture:firebase/functions') return 'export const getFunctions = () => ({}); export const httpsCallable = () => { throw new Error("Unexpected callable in completion test"); };';
         if (id === '\0fixture:firebase/database') {
           return 'export const getDatabase = () => ({});\n' + ['ref', 'get', 'set', 'update', 'remove', 'runTransaction']
             .map((name) => `export const ${name} = (...args) => globalThis.__loyaltyDatabaseFixture.${name}(...args);`).join('\n');
@@ -155,4 +157,11 @@ test('changing an appointment to No Show does not award a loyalty point', async 
   await updateBookingStatus('appointment', 'No Show');
   assert.equal(records.users.client.loyaltyPoints, 2);
   assert.equal(records.bookings.appointment.rewardGiven, undefined);
+});
+
+test('returning an appointment to pending keeps its durable schedule reservation', async () => {
+  await updateBookingStatus('appointment', 'Pending Confirmation');
+  assert.equal(records.bookings.appointment.status, 'Pending Confirmation');
+  assert.equal(records.scheduleSlots['2026-11-18'].appointment.status, 'Pending Confirmation');
+  assert.equal(records.users.client.loyaltyPoints, 2);
 });

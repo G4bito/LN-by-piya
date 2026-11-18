@@ -147,6 +147,8 @@ function App() {
   const [rescheduleBooking, setRescheduleBooking] = useState(null);
   const [works, setWorks] = useState([]);
   const [businessInfo, setBusinessInfo] = useState(() => normalizeBusinessSettings());
+  const [businessSettingsLoading, setBusinessSettingsLoading] = useState(true);
+  const [businessSettingsError, setBusinessSettingsError] = useState('');
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
@@ -449,8 +451,11 @@ function App() {
   useEffect(() => {
     return listenToBusinessSettings((settings) => {
       setBusinessInfo(normalizeBusinessSettings(settings));
+      setBusinessSettingsLoading(false);
+      setBusinessSettingsError('');
     }, () => {
-      setBusinessInfo(normalizeBusinessSettings());
+      setBusinessSettingsLoading(false);
+      setBusinessSettingsError('Booking availability could not be refreshed.');
     });
   }, []);
 
@@ -730,6 +735,8 @@ function App() {
             defaultService={selectedService}
             user={user}
             businessSettings={businessInfo}
+            businessSettingsLoading={businessSettingsLoading}
+            businessSettingsError={businessSettingsError}
             rescheduleBooking={rescheduleBooking}
             onViewBookings={() => { setRescheduleBooking(null); handleNavigate('profile'); }}
             onBackHome={() => { setRescheduleBooking(null); handleNavigate('home'); }}
@@ -748,6 +755,8 @@ function App() {
             onViewProfile={handleViewProfile}
             onToggleUserStatus={handleToggleUserStatus}
             businessSettings={businessInfo}
+            businessSettingsLoading={businessSettingsLoading}
+            businessSettingsError={businessSettingsError}
           />
         ) : isSignedIn ? (
           <HomePage onBookService={goToBooking} onViewPortfolio={goToPortfolio} works={works} businessInfo={businessInfo} />

@@ -7,6 +7,7 @@ import { defineSecret, defineString } from 'firebase-functions/params';
 import { setGlobalOptions } from 'firebase-functions/v2';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
+import { AvailabilityError, createBookingAvailabilityService } from './bookingAvailabilityService.js';
 import {
   MAX_OTP_ATTEMPTS,
   OTP_TTL_MS,
@@ -67,6 +68,17 @@ const REMINDER_LOCK_MS = 10 * 60 * 1000;
 
 const database = getDatabase();
 const adminAuth = getAuth();
+const bookingAvailability = createBookingAvailabilityService(database);
+const availabilityCallable = (handler) => onCall(async (request) => {
+  try { return await handler(request); }
+  catch (error) {
+    if (error instanceof AvailabilityError) throw new HttpsError(error.code, error.message);
+    logger.error('Booking availability operation failed.', { code: error?.code });
+    throw new HttpsError('internal', 'We could not save this change. Please try again.');
+  }
+});
+export const submitBooking = availabilityCallable(bookingAvailability.submitBooking);
+export const saveBookingAvailability = availabilityCallable(bookingAvailability.saveAvailability);
 
 function getPepper() {
   const pepper = String(PASSWORD_RESET_PEPPER.value() || '');

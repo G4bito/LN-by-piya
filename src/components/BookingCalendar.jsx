@@ -42,9 +42,9 @@ function formatAppointmentDate(value) {
   return parsed.toLocaleDateString([], { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-function getInitialMonth() {
-  const current = new Date();
-  return new Date(current.getFullYear(), current.getMonth(), 1);
+function getInitialMonth(timezone = 'Asia/Manila') {
+  const [year, month] = getDateKeyInTimeZone(new Date(), timezone).split('-').map(Number);
+  return new Date(year, month - 1, 1);
 }
 
 function getMonthKey(value) {
@@ -58,17 +58,18 @@ function getContinueLabel(step) {
   return 'Confirm Booking';
 }
 
-export default function BookingCalendar({ defaultService, user, onViewBookings, onBackHome, onEditProfile, businessSettings, rescheduleBooking }) {
+export default function BookingCalendar({ defaultService, user, onViewBookings, onBackHome, onEditProfile, businessSettings, businessSettingsLoading = false, businessSettingsError = '', rescheduleBooking }) {
   const settings = useMemo(() => normalizeBusinessSettings(businessSettings), [businessSettings]);
   const minimumStep = rescheduleBooking ? 1 : 0;
   const bookingContainerRef = useRef(null);
+  const bookingIntentRef = useRef(null);
   const previousStepRef = useRef(defaultService?.skipServiceStep ? 1 : 0);
   const [step, setStep] = useState(defaultService?.skipServiceStep ? 1 : 0);
   const [service, setService] = useState(defaultService?.id || null);
   const [serviceFilter, setServiceFilter] = useState('All');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
-  const [calendarMonth, setCalendarMonth] = useState(getInitialMonth);
+  const [calendarMonth, setCalendarMonth] = useState(() => getInitialMonth(settings.timezone));
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -195,14 +196,15 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     todayKey,
     closedWeekdays,
     blackoutDates: blackoutDateKeys,
+    dateOverrides: settings.dateOverrides,
     fullyBookedDates,
     noAvailableTimesDates,
     maximumDateKey,
     allowSameDayBooking: settings.allowSameDayBooking,
-  }), [blackoutDateKeys, calendarMonth, closedWeekdays, fullyBookedDates, noAvailableTimesDates, maximumDateKey, settings.allowSameDayBooking, todayKey]);
+  }), [blackoutDateKeys, calendarMonth, closedWeekdays, fullyBookedDates, noAvailableTimesDates, maximumDateKey, settings.allowSameDayBooking, settings.dateOverrides, todayKey]);
   const canNext =
     (step === 0 && Boolean(service)) ||
-    (step === 1 && Boolean(date && time) && timeSlots.includes(time) && !availabilityLoading && !availabilityError && !unavailableTimeSlots.has(time)) ||
+    (step === 1 && Boolean(date && time) && timeSlots.includes(time) && !availabilityLoading && !availabilityError && !businessSettingsLoading && !businessSettingsError && !unavailableTimeSlots.has(time)) ||
     (step === 2 && nameRegex.test(cleanedName) && isValidPhoneNumber(cleanedPhone) && cleanedAddress.length > 0 && (!isPerNailService || nailQuantity > 0));
 
   useEffect(() => {
@@ -231,30 +233,30 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
   }, [bookingConfirmed, monthKey]);
 
   useEffect(() => {
-    if (!time || (timeSlots.includes(time) && !unavailableTimeSlots.has(time))) return;
+    if (isSaving || bookingConfirmed || !time || (timeSlots.includes(time) && !unavailableTimeSlots.has(time))) return;
     const message = `Sorry, ${formatSlotTime(time)} is no longer available. Please select another time.`;
     setTime('');
     setError(message);
     setToast({ type: 'error', message });
-  }, [time, timeSlots, unavailableTimeSlots]);
+  }, [time, timeSlots, unavailableTimeSlots, isSaving, bookingConfirmed]);
 
   useEffect(() => {
-    if (!date || !fullyBookedDates.has(date)) return;
+    if (isSaving || bookingConfirmed || !date || !fullyBookedDates.has(date)) return;
     setDate('');
     setTime('');
     const message = 'That date has just become fully booked. Please select another available day.';
     setError(message);
     setToast({ type: 'error', message });
-  }, [date, fullyBookedDates]);
+  }, [date, fullyBookedDates, isSaving, bookingConfirmed]);
 
   useEffect(() => {
-    if (!date) return;
+    if (isSaving || bookingConfirmed || !date) return;
     const restriction = getBookingDateRestriction(date, settings, now);
     if (!restriction) return;
     setDate('');
     setTime('');
     setError(`That date is unavailable: ${restriction}.`);
-  }, [date, now, settings]);
+  }, [date, now, settings, isSaving, bookingConfirmed]);
 
   useEffect(() => {
     if (settings.allowReferencePhoto || (!referenceImageUrl && !referenceImageFile)) return;
@@ -350,7 +352,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     setServiceFilter('All');
     setDate('');
     setTime('');
-    setCalendarMonth(getInitialMonth());
+    setCalendarMonth(getInitialMonth(settings.timezone));
     setNotes('');
     setNailQuantity(clampNailQuantity(defaultService?.nailQuantity ?? defaultService?.repairNailsCount ?? 1));
     setNailArtEnabled(defaultService?.nailArt?.enabled === true);
@@ -364,6 +366,10 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
 
   const handleConfirm = async () => {
     if (isSaving) return;
+    if (businessSettingsLoading || businessSettingsError) {
+      setError(businessSettingsError || 'Please wait while we load booking availability.');
+      return;
+    }
     setError(null);
     setToast(null);
 
@@ -401,6 +407,9 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
       },
       ...servicePricingFields,
     };
+    const intentKey = JSON.stringify({ ...bookingPayload, referenceImageFile: referenceImageFile ? [referenceImageFile.name, referenceImageFile.size, referenceImageFile.lastModified] : null });
+    if (bookingIntentRef.current?.key !== intentKey) bookingIntentRef.current = { key: intentKey, id: crypto.randomUUID() };
+    bookingPayload.id = bookingIntentRef.current.id;
 
     try {
       let savedBooking = null;
@@ -535,9 +544,11 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
 
             {step === 1 ? (
               <div className="datetime-panel">
+                {businessSettingsLoading ? <p role="status">Loading booking availability…</p> : null}
+                {businessSettingsError ? <p role="alert">{businessSettingsError} Reload before booking.</p> : null}
                 <section className="booking-calendar" aria-label="Appointment calendar">
                   <div className="booking-calendar-header">
-                    <button type="button" onClick={() => handleMonthChange(-1)} disabled={monthKey <= getMonthKey(getInitialMonth())} aria-label="Previous month">&#8592;</button>
+                    <button type="button" onClick={() => handleMonthChange(-1)} disabled={monthKey <= getMonthKey(getInitialMonth(settings.timezone))} aria-label="Previous month">&#8592;</button>
                     <h3>{calendarMonth.toLocaleDateString([], { month: 'long', year: 'numeric' })}</h3>
                     <button type="button" onClick={() => handleMonthChange(1)} disabled={monthKey >= maximumDateKey.slice(0, 7)} aria-label="Next month">&#8594;</button>
                   </div>
@@ -550,7 +561,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                         type="button"
                         key={cell.key}
                         className={`${date === cell.key ? 'is-selected' : ''} ${cell.key === todayKey ? 'is-today' : ''} ${cell.isClosed ? 'is-closed' : ''} ${cell.isBlackout ? 'is-blackout' : ''} ${cell.isFullyBooked || cell.isBeyondAdvanceWindow || cell.isSameDayUnavailable || cell.hasNoAvailableTimes ? 'is-unavailable' : ''}`}
-                        disabled={cell.disabled}
+                        disabled={cell.disabled || businessSettingsLoading || Boolean(businessSettingsError)}
                         onClick={() => {
                           setDate(cell.key);
                           setTime('');
@@ -585,7 +596,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                               key={slotTime}
                               type="button"
                               className={`slot ${time === slotTime ? 'selected' : ''} ${unavailable ? 'slot--unavailable' : ''}`}
-                              disabled={!date || unavailable || availabilityLoading || Boolean(availabilityError)}
+                              disabled={!date || unavailable || availabilityLoading || Boolean(availabilityError) || businessSettingsLoading || Boolean(businessSettingsError)}
                               onClick={() => {
                                 setTime(slotTime);
                                 setError(null);

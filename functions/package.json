@@ -8,7 +8,7 @@
     "node": "22"
   },
   "scripts": {
-    "check": "node --check index.js && node --check passwordResetCore.js && node --check appointmentReminderCore.js"
+    "check": "node --check index.js && node --check passwordResetCore.js && node --check appointmentReminderCore.js && node --check bookingAvailabilityService.js"
   },
   "dependencies": {
     "firebase-admin": "^14.1.0",

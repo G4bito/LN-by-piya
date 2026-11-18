@@ -8,6 +8,7 @@ serviceAccountKey.json
 
 firebase-debug.log
 firebase-debug.*.log
+database-debug.log
 
 # Local coding/design assistant configuration
 .claude/

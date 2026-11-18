@@ -2,6 +2,7 @@
 // npm install firebase
 
 import { getApp, getApps, initializeApp } from 'firebase/app';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
   getAuth,
   GoogleAuthProvider,
@@ -41,6 +42,7 @@ import {
   isCancelledAppointmentStatus,
 } from './appointmentNotifications';
 import { applyCompletedBookingReward } from './adminData';
+import { isAppointmentWithinAvailability, validateDateOverride } from '../functions/shared/availability.js';
 import {
   applyLoyaltyRewardClaim,
   createLoyaltyProgramPayload,
@@ -51,11 +53,9 @@ import {
   getImageFileValidationError,
 } from './imageUploadConfig';
 import {
-  PENDING_SLOT_HOLD_MS,
   ScheduleConflictError,
   createScheduleEntry,
   getAppointmentDurationMinutes,
-  getAppointmentInterval,
   hasScheduleConflict,
   isConfirmedScheduleStatus,
 } from './scheduling';
@@ -447,17 +447,6 @@ export async function requestPasswordResetEmail(email) {
   return { success: true, message: PASSWORD_RESET_EMAIL_MESSAGE };
 }
 
-function promiseWithTimeout(promise, ms, errorMessage) {
-  let timeoutId;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(errorMessage)), ms);
-  });
-
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    clearTimeout(timeoutId);
-  });
-}
-
 function getNotificationServiceName(booking) {
   return String(booking?.serviceName || booking?.serviceTitle || booking?.service || 'appointment')
     .trim()
@@ -529,163 +518,61 @@ async function createCustomerRequestSentNotification(request, booking) {
 }
 
 export async function saveBooking(booking) {
-  const referenceImageFile = booking?.referenceImageFile || null;
-  const onReferenceUploadProgress = typeof booking?.onReferenceUploadProgress === 'function'
-    ? booking.onReferenceUploadProgress
-    : null;
-  const bookingData = { ...(booking || {}) };
-  delete bookingData.referenceImageFile;
-  delete bookingData.onReferenceUploadProgress;
-  const appointmentInterval = getAppointmentInterval(bookingData);
-  const sanitizedBooking = Object.fromEntries(
-    Object.entries({
-      ...bookingData,
-      name: sanitizeName(bookingData?.name || bookingData?.customerName),
-      customerName: sanitizeName(bookingData?.customerName || bookingData?.name),
-      email: bookingData?.email || bookingData?.customerEmail || '',
-      phone: sanitizePhone(bookingData?.phone || bookingData?.customerPhone),
-      customerPhone: sanitizePhone(bookingData?.customerPhone || bookingData?.phone),
-      address: bookingData?.address || '',
-      notes: String(bookingData?.notes || '').trim(),
-      serviceName: String(bookingData?.serviceName || bookingData?.serviceTitle || '').trim(),
-      status: 'Pending Confirmation',
-      seenByAdmin: false,
-      durationMinutes: appointmentInterval?.durationMinutes || getAppointmentDurationMinutes(bookingData),
-      startMinutes: appointmentInterval?.startMinutes,
-      endMinutes: appointmentInterval?.endMinutes,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }).filter(([, value]) => value !== undefined)
-  );
-
-  if (!isRealtimeDatabaseAvailable()) {
-    throw new Error('Realtime Database is not initialized. Check VITE_FIREBASE_DATABASE_URL and restart the app.');
-  }
-
-  if (!sanitizedBooking.uid) {
+  if (!isRealtimeDatabaseAvailable() || !auth?.currentUser) {
     throw new Error('Please sign in before submitting a booking.');
   }
-
+  const { referenceImageFile, onReferenceUploadProgress, ...bookingData } = booking || {};
+  const id = bookingData.id || push(ref(rtdb, 'bookings')).key;
   const settingsSnapshot = await get(ref(rtdb, 'settings/business'));
-  const businessSettings = normalizeBusinessSettings(settingsSnapshot.exists() ? settingsSnapshot.val() : {});
-  const dateRestriction = getBookingDateRestriction(sanitizedBooking.date, businessSettings, new Date());
-  if (dateRestriction) {
-    throw new ScheduleConflictError(`This appointment date is unavailable: ${dateRestriction}. Please choose another day.`);
+  const settings = normalizeBusinessSettings(settingsSnapshot.val() || {});
+  const duration = getAppointmentDurationMinutes(bookingData);
+  if (!getBookableTimeSlots(bookingData.date, duration, settings, new Date()).includes(bookingData.time)) {
+    throw new ScheduleConflictError('This time is no longer available. Please select another time.');
   }
-  const allowedSlots = getBookableTimeSlots(
-    sanitizedBooking.date,
-    appointmentInterval?.durationMinutes,
-    businessSettings,
-    new Date()
-  );
-  if (!allowedSlots.includes(sanitizedBooking.time)) {
-    throw new ScheduleConflictError('This appointment time is outside the current online booking availability. Please choose another time.');
-  }
-
-  const bookingsRef = ref(rtdb, 'bookings');
-  const newBookingRef = push(bookingsRef);
-  const bookingId = newBookingRef.key;
-  let bookingWithId = { id: bookingId, ...sanitizedBooking };
-  const pendingScheduleEntry = createScheduleEntry(
-    bookingWithId,
-    'Pending',
-    Date.now() + PENDING_SLOT_HOLD_MS
-  );
-  if (!pendingScheduleEntry) {
-    throw new Error('Please select a valid service, date, and time before confirming.');
-  }
-  let scheduleLock = null;
-  let scheduleClaimCreated = false;
   let uploadedReference = null;
-
   try {
-    scheduleLock = await acquireScheduleMutex(sanitizedBooking.date, sanitizedBooking.uid);
-    const scheduleEntries = await readScheduleDate(sanitizedBooking.date);
-    if (hasReachedDailyAppointmentLimit(scheduleEntries, sanitizedBooking.date, businessSettings)
-      || hasScheduleConflict(bookingWithId, scheduleEntries, {
-        includePendingHolds: true,
-        bufferMinutes: businessSettings.appointmentBufferMinutes,
-      })) {
-      throw new ScheduleConflictError();
+    if (settings.allowReferencePhoto && referenceImageFile) {
+      uploadedReference = await uploadImageFile(referenceImageFile, 'booking-references', onReferenceUploadProgress, {
+        pathSegments: [id], returnMetadata: true,
+      });
+      Object.assign(bookingData, {
+        referenceImageUrl: uploadedReference.url,
+        referenceImageStoragePath: uploadedReference.storagePath,
+        referenceImageContentType: uploadedReference.contentType,
+        referenceImageSize: uploadedReference.size,
+        referenceImageOriginalFileName: uploadedReference.originalFileName,
+      });
     }
-
-    await set(ref(rtdb, `scheduleSlots/${sanitizedBooking.date}/${bookingId}`), pendingScheduleEntry);
-    scheduleClaimCreated = true;
+    if (!settings.allowReferencePhoto) {
+      delete bookingData.referenceImageUrl;
+      delete bookingData.referenceImageStoragePath;
+    }
+    const result = await httpsCallable(getFunctions(app, 'asia-southeast1'), 'submitBooking')({ ...bookingData, id });
+    // A retry may replay a previously saved booking and its original photo.
+    if (uploadedReference && result.data.referenceImageStoragePath !== uploadedReference.storagePath) {
+      await deleteImageFile(uploadedReference.storagePath).catch(() => {});
+    }
+    return result.data;
   } catch (error) {
-    if (scheduleClaimCreated) {
-      await removeScheduleClaim(sanitizedBooking.date, bookingId).catch((cleanupError) => {
-        console.warn('Unable to clean up an incomplete schedule claim.', cleanupError);
-      });
+    // Do not delete a photo on an ambiguous network failure: the server may have saved it.
+    if (uploadedReference && ['functions/invalid-argument', 'functions/permission-denied', 'functions/failed-precondition', 'functions/already-exists'].includes(error?.code)) {
+      await deleteImageFile(uploadedReference.storagePath).catch(() => {});
     }
-    throw error;
-  } finally {
-    await releaseScheduleMutex(scheduleLock);
-  }
-
-  try {
-    if (!businessSettings.allowReferencePhoto) {
-      sanitizedBooking.referenceImageUrl = '';
-    } else if (referenceImageFile) {
-      uploadedReference = await uploadImageFile(
-        referenceImageFile,
-        'booking-references',
-        onReferenceUploadProgress,
-        { pathSegments: [bookingId], returnMetadata: true }
-      );
-      sanitizedBooking.referenceImageUrl = uploadedReference.url;
-      sanitizedBooking.referenceImageStoragePath = uploadedReference.storagePath;
-      sanitizedBooking.referenceImageContentType = uploadedReference.contentType;
-      sanitizedBooking.referenceImageSize = uploadedReference.size;
-      sanitizedBooking.referenceImageOriginalFileName = uploadedReference.originalFileName;
-    }
-    bookingWithId = { id: bookingId, ...sanitizedBooking };
-
-    await promiseWithTimeout(
-      set(newBookingRef, sanitizedBooking),
-      20000,
-      'Booking save timed out. Please check your connection and try again.'
-    );
-  } catch (error) {
-    if (scheduleClaimCreated) {
-      await removeScheduleClaim(sanitizedBooking.date, bookingId).catch((cleanupError) => {
-        console.warn('Unable to clean up an incomplete schedule claim.', cleanupError);
-      });
-    }
-    if (uploadedReference?.storagePath) {
-      await deleteImageFile(uploadedReference.storagePath).catch((cleanupError) => {
-        console.warn('Unable to clean up an incomplete booking reference upload.', {
-          path: uploadedReference.storagePath,
-          code: cleanupError?.code || 'storage/unknown',
-        });
-      });
+    if (['functions/failed-precondition', 'functions/already-exists', 'functions/aborted'].includes(error?.code)) {
+      throw new ScheduleConflictError(error.message);
     }
     throw error;
   }
+}
 
-  if (sanitizedBooking.uid) {
-    const authUser = {
-      uid: sanitizedBooking.uid,
-      email: sanitizedBooking.email || '',
-      displayName: sanitizedBooking.customerName || sanitizedBooking.name || '',
-    };
-
-    createOrUpdateCustomerRecord(authUser).catch((error) => {
-      console.warn('Failed to sync customer record after booking save', error);
-    });
-  }
-
-  await createAdminNotification({
-    id: bookingId,
-    type: 'new_booking',
-    title: 'New Booking',
-    message: `${sanitizedBooking.customerName || sanitizedBooking.name || 'A customer'} booked ${getNotificationServiceName(sanitizedBooking)} for ${getNotificationSchedule(sanitizedBooking)}.`,
-    targetType: 'booking',
-    bookingId,
-  }).catch((error) => {
-    console.warn('The booking was saved, but its Admin notification could not be created.', error);
+export async function saveBookingAvailability(date, override, acknowledgedAppointmentIds = []) {
+  if (!app || !auth?.currentUser) throw new Error('Please sign in as an administrator.');
+  const errors = validateDateOverride(date, override);
+  if (errors.length) throw new Error(errors[0]);
+  const result = await httpsCallable(getFunctions(app, 'asia-southeast1'), 'saveBookingAvailability')({
+    date, override, acknowledgedAppointmentIds,
   });
-
-  return bookingWithId;
+  return result.data;
 }
 
 function getScheduleEntries(snapshot) {
@@ -717,7 +604,7 @@ async function releaseScheduleMutex(lock) {
   if (!lock) return;
   try {
     await runTransaction(lock.mutexRef, (current) => (
-      current?.token === lock.token ? null : undefined
+      current === null || current.token === lock.token ? null : undefined
     ), { applyLocally: false });
   } catch (error) {
     console.warn('Unable to release the schedule lock; it will expire automatically.', error);
@@ -804,6 +691,9 @@ export async function updateBookingStatus(bookingId, status) {
       scheduleLock = await acquireScheduleMutex(booking.date, auth?.currentUser?.uid || booking.uid);
 
       if (isConfirmedScheduleStatus(normalizedStatus)) {
+        if (!isAppointmentWithinAvailability(booking, businessSettings)) {
+          throw new ScheduleConflictError('This appointment conflicts with the current available hours. Review its date and time before confirming.');
+        }
         const [scheduleEntries, bookingsForDate] = await Promise.all([
           readScheduleDate(booking.date),
           readBookingsForDate(booking.date),
@@ -828,7 +718,11 @@ export async function updateBookingStatus(bookingId, status) {
         await update(bookingRef, updateData);
       } else {
         await update(bookingRef, updateData);
-        await removeScheduleClaim(booking.date, bookingId);
+        if (normalizedStatus === 'Pending Confirmation') {
+          await set(ref(rtdb, `scheduleSlots/${booking.date}/${bookingId}`), createScheduleEntry(booking, 'Pending Confirmation'));
+        } else {
+          await removeScheduleClaim(booking.date, bookingId);
+        }
       }
     } else {
       await update(bookingRef, updateData);
@@ -1456,8 +1350,8 @@ export async function syncConfirmedScheduleSlots(bookings = []) {
   bookings.forEach((booking) => {
     if (!booking?.id || !booking?.date) return;
     const schedulePath = `${booking.date}/${booking.id}`;
-    if (isConfirmedScheduleStatus(booking.status)) {
-      const entry = createScheduleEntry(booking, 'Confirmed');
+    if (isConfirmedScheduleStatus(booking.status) || booking.status === 'Pending Confirmation') {
+      const entry = createScheduleEntry(booking, isConfirmedScheduleStatus(booking.status) ? 'Confirmed' : 'Pending Confirmation');
       const currentEntry = currentEntries.get(schedulePath);
       const isCurrent = entry && currentEntry && comparableFields.every((field) => (
         (entry[field] ?? null) === (currentEntry[field] ?? null)
