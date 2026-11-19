@@ -6,9 +6,14 @@
     "rules": "storage.rules"
   },
   "functions": {
-    "source": "functions"
+    "source": "functions",
+    "codebase": "booking"
   },
   "emulators": {
+    "functions": {
+      "host": "127.0.0.1",
+      "port": 5001
+    },
     "auth": {
       "host": "127.0.0.1",
       "port": 9099
