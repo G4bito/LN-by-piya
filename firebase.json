@@ -7,7 +7,8 @@
   },
   "functions": {
     "source": "functions",
-    "codebase": "booking"
+    "codebase": "booking",
+    "ignore": ["node_modules", ".git", "firebase-debug.log", "firebase-debug.*.log", ".env*", "index.js", "passwordResetCore.js", "appointmentReminderCore.js"]
   },
   "emulators": {
     "functions": {

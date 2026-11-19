@@ -2,7 +2,10 @@ import { logger } from 'firebase-functions';
 import { defineString } from 'firebase-functions/params';
 import { onCall } from 'firebase-functions/v2/https';
 import { createBookingCallableHandler } from './bookingCallable.js';
-import { getBookingRuntime } from './bookingRuntime.js';
+import { getBookingRuntime, initializeBookingApp } from './bookingRuntime.js';
+
+// Reuse the default app before the callable framework verifies its first token.
+initializeBookingApp();
 
 // This codebase exports booking only: no email secrets or scheduled jobs.
 // https://firebase.google.com/docs/functions/organize-functions#organize_functions_in_codebases

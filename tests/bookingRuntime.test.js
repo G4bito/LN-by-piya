@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-test('deployed booking entry starts without native CommonJS require of ESM support', () => {
-  // Vercel's loader can reject require(ESM) even on Node 24. Exercise the real
-  // entry and SDK imports in a fresh process, before any credentials are used.
+test('retired Vercel entry cannot initialize Admin credentials or accept stale booking submissions', () => {
+  // A stale frontend must receive a safe response without loading Admin SDK
+  // dependencies or needing native CommonJS require(ESM) support.
   const script = `
     import handler from './api/booking.js';
     const response = () => ({
@@ -26,5 +26,5 @@ test('deployed booking entry starts without native CommonJS require of ESM suppo
     env: { ...process.env, NODE_ENV: 'production', VERCEL: '1' },
   });
   assert.equal(result.status, 0, result.stderr || result.error?.message);
-  assert.deepEqual(JSON.parse(result.stdout.trim()), { get: 405, post: 401, error: 'booking/unauthenticated' });
+  assert.deepEqual(JSON.parse(result.stdout.trim()), { get: 410, post: 410, error: 'booking/client-update-required' });
 });

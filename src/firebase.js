@@ -531,7 +531,7 @@ export async function saveBooking(booking) {
       delete bookingData.referenceImageUrl;
       delete bookingData.referenceImageStoragePath;
     }
-    operation = 'submit-booking-api';
+    operation = 'submit-booking-callable';
     const result = await requestBookingOperation(auth.currentUser, 'submit', { ...bookingData, id });
     // A retry may replay a previously saved booking and its original photo.
     if (uploadedReference && result.referenceImageStoragePath !== uploadedReference.storagePath) {

@@ -26,7 +26,10 @@ async function optionalOperation(operation, action, log) {
     await Promise.race([action(), new Promise((_, reject) => {
       timer = setTimeout(() => reject(Object.assign(new Error('Optional operation timed out.'), { code: 'deadline-exceeded' })), 1500);
     })]);
-  } catch (error) { log(bookingDiagnostic(error, operation)); }
+  } catch (error) {
+    try { log(bookingDiagnostic(error, operation)); }
+    catch { /* Optional diagnostics cannot reject an already committed appointment. */ }
+  }
   finally { clearTimeout(timer); }
 }
 

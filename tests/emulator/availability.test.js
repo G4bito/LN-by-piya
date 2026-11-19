@@ -217,3 +217,14 @@ test('a mutex-release outage does not report a committed booking as failed', asy
   assert.equal((await database.ref(`bookings/${booking.id}`).get()).val().id, booking.id);
   assert.equal(logs[0].operation, 'release-date-lock');
 });
+
+test('notification and diagnostic logger outages cannot reject a committed appointment', async () => {
+  const isolated = createBookingAvailabilityService(failingDatabase('notification'), {
+    log: () => { throw new Error('synthetic diagnostic logger outage'); },
+  });
+  const booking = await isolated.submitBooking(request());
+  assert.equal((await database.ref(`bookings/${booking.id}`).get()).val().status, 'Pending Confirmation');
+  assert.equal((await database.ref(`scheduleSlots/${date}/${booking.id}/status`).get()).val(), 'Pending Confirmation');
+  assert.equal((await database.ref(`adminNotifications/${booking.id}`).get()).exists(), false);
+  assert.equal((await database.ref(`scheduleMutexes/${date}`).get()).exists(), false);
+});
