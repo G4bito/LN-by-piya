@@ -2,7 +2,7 @@
 
 Production: `https://ln-by-piya.vercel.app/`. Firebase project: `ln-by-piya`. Investigation date: November 19, 2026, Asia/Manila.
 
-The fix is local pending approval to push/deploy and configure server credentials. Production checks were read-only: no test appointments, data corrections, rules updates, billing changes, account deletions, or loyalty resets were performed.
+The user approved pushing `main` and the connected Vercel deployment. Server credentials and production booking readiness must still be verified separately. Production checks were read-only: no test appointments, data corrections, rules updates, billing changes, account deletions, or loyalty resets were performed.
 
 ## Confirmed root cause
 
@@ -55,27 +55,31 @@ Diagnostics contain only an event name, a fixed operation name, and a sanitized 
 | `src/bookingApi.js`, `src/firebase.js` | Same-origin authenticated transport, response validation, stable ID generation, staged safe diagnostics, preserved photo cleanup. |
 | `src/components/BookingCalendar.jsx` | Preserve retry IDs, support mobile ID generation, catch setup failures, and show appropriate safe error feedback. |
 | `functions/bookingAvailabilityService.js`, `functions/shared/bookingErrors.js` | Reused trusted scheduling service, operation diagnostics, atomic core commit, optional notification/lease cleanup, and lost-response recovery. |
-| `package.json`, `package-lock.json` | Move the already-installed Firebase Admin SDK to runtime dependencies without changing dependency versions; add sequential auth/API emulator tests. |
-| `tests/bookingApi.test.js`, `tests/emulator-auth/bookingSubmission.test.js`, `tests/emulator/availability.test.js` | API security/transport, actual SDK-to-HTTP-to-database tests, and transaction/recovery fault injection. |
+| `package.json`, `package-lock.json` | Runtime Firebase Admin dependency pinned to compatible 13.10.0, Node 24 runtime, and sequential auth/API emulator tests. |
+| `tests/bookingApi.test.js`, `tests/bookingRuntime.test.js`, `tests/emulator-auth/bookingSubmission.test.js`, `tests/emulator/availability.test.js` | API security/transport, actual entry-point startup regression, SDK-to-HTTP-to-database tests, and transaction/recovery fault injection. |
 
 The preceding [login fix](customer-access-fix.md) is retained and documented separately. `database.rules.json` is unchanged by these fixes.
 
 ## Verification
 
-- `npm.cmd test`: **139 tests passed**.
+- `npm.cmd test`: **140 tests passed**, including the real API entry imported in a fresh Node process with native CommonJS `require(ESM)` support disabled. This regression test failed with the exact production `ERR_REQUIRE_ESM` before the dependency repair and passed afterward.
 - `npm.cmd run test:auth-emulator`: **19 tests passed**, including seven actual HTTP booking tests and twelve login tests. They cover the reported service/date/time configuration, customers with/without loyalty, closed/blocked hours, overlapping concurrent submissions, stable retry replay, unchanged loyalty records, customer history, admin reads, forged tokens/ownership, and restricted writes.
 - Isolated headless Edge at **390 × 844px**: **22 browser checks passed** using the actual app, booking UI, API handler, and demo Auth/Database emulators. They included the November 26, 2026 10:00 AM Gel Manicure review/submission, a simulated API failure followed by one successful retry, customer history, unchanged loyalty, session restoration, admin login, optional reward-definition failure, and essential profile denial. The booking also succeeded with browser `crypto.randomUUID` disabled. Google was tested with an emulator credential; real OAuth popups and real iPhone/Messenger engines remain unverified.
 - `npm.cmd run test:emulator`: **20 tests passed**, including notification outage, failed atomic commit/rollback, lost response/replay, failed mutex release, concurrency, authorization rules, and existing reward-history safety.
 - `npm.cmd run build`: passed. The existing main chunk above 500KB remains a warning.
 - `npm.cmd run check --prefix functions`, Node syntax checks, and `git diff --check`: passed.
 - The browser bundle contains neither the server credential environment key nor the private server initializer.
+- After the SDK compatibility repair, all **39 Auth/Database emulator tests** were rerun together and passed. The Vercel-packaged entry also returned GET 405 with native `require(ESM)` support disabled.
+- `npm audit --omit=dev` still reports **18 dependency findings (10 high, 8 moderate)**, compared with 21 in the preceding lockfile. This is not a clean audit. The traced booking function excludes the older optional Firestore/Storage packages and their UUID/gRPC dependencies; broader dependency updates remain separate work.
 
 ## Publication requirements
 
-The initial Vercel publication exposed a separate startup compatibility error: `ERR_REQUIRE_ESM` from `jwks-rsa@4.1.0` requiring `jose@6.2.3`. The application now pins Node **24.x** in the root package and lockfile, matching the tested runtime. The identical error was reproduced locally with ESM require support disabled; the normal Node 24 invocation and a 390-file package produced by Vercel's official Node builder returned the expected GET 405. The original deployment's exact Node patch version was not present in the supplied log. No dependency was downgraded. See [Vercel Node version overrides](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions#version-overrides-in-packagejson).
+The initial Vercel publication exposed a separate startup compatibility error: `ERR_REQUIRE_ESM` from `firebase-admin@14.1.0` → `jwks-rsa@4.1.0` requiring the ESM-only `jose@6.2.3`. Pinning Node **24.x** alone did not resolve it: the user supplied the same startup error from deployment `14e1791`. The crash occurs during module initialization, before token verification, reservation transactions, or credential configuration can run. It is separate from the original missing Firebase callable.
+
+The root Vercel application now pins the official **Firebase Admin 13.10.0** release, resolving its supported `jwks-rsa@3.2.2` → `jose@4.15.9` chain. There are no cross-major transitive overrides or edits to installed library code. Firebase ID-token verification, revocation checks, UID authorization, and all reservation safeguards remain unchanged. The undeployed standalone Firebase Functions package is unchanged. The actual entry-point regression test now starts successfully without native `require(ESM)` support, returning GET 405 and unauthenticated POST 401. A 414-file package generated by Vercel's official Node builder also starts successfully locally. See the matching [JWKS upstream report](https://github.com/auth0/node-jwks-rsa/issues/507) and [Firebase Admin upstream report](https://github.com/firebase/firebase-admin-node/issues/3181).
 
 1. Configure Vercel's **server-only** `FIREBASE_PROJECT_ID=ln-by-piya`, `FIREBASE_DATABASE_URL=https://ln-by-piya-default-rtdb.asia-southeast1.firebasedatabase.app`, and a valid `FIREBASE_SERVICE_ACCOUNT_JSON` for this project. Keep the private credential in the hosting environment, with no `VITE_` prefix and no committed key file. The saved interactive Firebase administrator login is not a production server credential.
-2. Obtain approval to push and deploy the API and matching frontend together. Publishing the frontend alone would leave booking unavailable. No Firebase functions deployment or billing change is required for this adapter.
+2. Push and deploy the API and matching frontend together under the user's existing release approval. Publishing the frontend alone would leave booking unavailable. No Firebase functions deployment or billing change is required for this adapter.
 3. Review and approve publication of the repository's existing restrictive database rules after the API is ready. They protect booking/slot/mutex writes through trusted server/admin paths and preserve UID-scoped customer reads. The older production rules still allow legacy client writes; aligning them is part of securing the coordinated release. No rule permissions were widened locally.
 4. Verify the Vercel API build and configured credentials, then check actual iPhone Safari and Messenger behavior. Local mobile Chromium and emulator testing cannot establish real WebKit/in-app-browser compatibility. No live customer sign-in or test appointment was performed.
 
