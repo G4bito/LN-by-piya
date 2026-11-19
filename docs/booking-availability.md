@@ -1,6 +1,6 @@
 # Settings and booking availability
 
-Current booking/availability publication uses the same-origin Vercel API described in [Booking submission repair](booking-submission-fix.md). That transport replaces the Firebase callable dependency in the original implementation report below and requires server-only Firebase Admin configuration on Vercel.
+The current local implementation uses managed Firebase callable functions, as documented in [Managed Firebase booking release](firebase-booking-release.md). The coordinated production release and restrictive rules are pending approval. Earlier deployment/transport notes below are historical.
 
 Implementation is local on `feature/booking-availability-manager`. Nothing has been pushed or deployed. No production bookings or settings were changed to test this feature.
 
