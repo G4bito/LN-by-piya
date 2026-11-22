@@ -51,6 +51,7 @@ import { SCHEDULE_CONFLICT_CODE } from '../scheduling';
 import { getDateKeyInTimeZone } from '../businessSettings';
 import { getDateAvailability, isAppointmentWithinAvailability } from '../../functions/shared/availability.js';
 import BookingAvailabilityManager from '../components/BookingAvailabilityManager';
+import SparkBookingPublication from '../components/SparkBookingPublication';
 import AdminSettings from '../components/AdminSettings';
 import './AdminDashboard.css';
 
@@ -1953,7 +1954,7 @@ function AdminPage({
           )}
 
           {activeTab === 'availability' && (
-            <BookingAvailabilityManager
+            <><SparkBookingPublication /><BookingAvailabilityManager
               settings={businessSettings}
               bookings={visibleBookings}
               selectedDate={availabilityDate}
@@ -1962,7 +1963,7 @@ function AdminPage({
               onViewAppointment={(booking) => setSelectedBookingId(booking.id)}
               loading={businessSettingsLoading || loading}
               loadError={businessSettingsError || backendError}
-            />
+            /></>
           )}
 
           {activeTab === 'settings' && (

@@ -2,7 +2,9 @@
 // npm install firebase
 
 import { getApp, getApps, initializeApp } from 'firebase/app';
-import { requestBookingOperation } from './bookingApi.js';
+import { submitSparkBooking, publishSparkAvailability, changeSparkBooking, listenSparkBookings, readSparkBookings, listenSparkSchedule } from './spark/client.js';
+import { encodeReferencePhoto } from './spark/photo.js';
+import { parseJournal, isBlocking as isSparkBlocking } from './spark/engine.js';
 import { bookingDiagnostic } from '../functions/shared/bookingErrors.js';
 import {
   getAuth,
@@ -502,62 +504,48 @@ export function createBookingId() {
 }
 
 export async function saveBooking(booking) {
-  const { referenceImageFile, onReferenceUploadProgress, ...bookingData } = booking || {};
-  let uploadedReference = null;
-  let operation = 'verify-customer-session';
-  try {
-    if (!isRealtimeDatabaseAvailable() || !auth?.currentUser) throw Object.assign(new Error('Please sign in before booking.'), { code: 'booking/unauthenticated' });
-    const id = bookingData.id || createBookingId();
-    operation = 'load-business-settings';
-    const settingsSnapshot = await get(ref(rtdb, 'settings/business'));
-    const settings = normalizeBusinessSettings(settingsSnapshot.val() || {});
-    operation = 'validate-availability';
-    const duration = getAppointmentDurationMinutes(bookingData);
-    if (!getBookableTimeSlots(bookingData.date, duration, settings, new Date()).includes(bookingData.time)) throw new ScheduleConflictError('This time is no longer available. Please select another time.');
-    if (settings.allowReferencePhoto && referenceImageFile) {
-      operation = 'upload-reference-photo';
-      uploadedReference = await uploadImageFile(referenceImageFile, 'booking-references', onReferenceUploadProgress, {
-        pathSegments: [id], returnMetadata: true,
-      });
-      Object.assign(bookingData, {
-        referenceImageUrl: uploadedReference.url,
-        referenceImageStoragePath: uploadedReference.storagePath,
-        referenceImageContentType: uploadedReference.contentType,
-        referenceImageSize: uploadedReference.size,
-        referenceImageOriginalFileName: uploadedReference.originalFileName,
-      });
-    }
-    if (!settings.allowReferencePhoto) {
-      delete bookingData.referenceImageUrl;
-      delete bookingData.referenceImageStoragePath;
-    }
-    operation = 'submit-booking-callable';
-    const result = await requestBookingOperation(auth.currentUser, 'submit', { ...bookingData, id });
-    // A retry may replay a previously saved booking and its original photo.
-    if (uploadedReference && result.referenceImageStoragePath !== uploadedReference.storagePath) {
-      await deleteImageFile(uploadedReference.storagePath).catch(() => {});
-    }
-    return result;
-  } catch (error) {
-    console.error('Booking submission failed.', bookingDiagnostic(error, operation));
-    // Do not delete a photo on an ambiguous network failure: the server may have saved it.
-    if (uploadedReference && ['invalid-argument', 'permission-denied', 'failed-precondition', 'already-exists'].includes(String(error?.code || '').split('/').pop())) {
-      await deleteImageFile(uploadedReference.storagePath).catch(() => {});
-    }
-    if (['failed-precondition', 'already-exists', 'aborted'].includes(String(error?.code || '').split('/').pop())) {
-      throw new ScheduleConflictError(error.message);
-    }
-    throw error;
-  }
+  if (!isRealtimeDatabaseAvailable() || !auth?.currentUser) throw new Error('Please sign in before booking.');
+  const id = booking.id || createBookingId();
+  const photo = booking.referenceImageFile ? await encodeReferencePhoto(booking.referenceImageFile) : (booking.referenceImageUrl || '');
+  booking.onReferenceUploadProgress?.(100);
+  const saved = await submitSparkBooking(rtdb, auth.currentUser, { ...booking, id }, photo);
+  // Saved reservation is authoritative. Notifications never turn it into a failure.
+  if (!saved.replayed) void createAdminNotification({ id, type: 'new_booking', title: 'New Booking',
+    message: `A customer submitted ${getNotificationServiceName(saved)} on ${getNotificationSchedule(saved)}.`, targetType: 'booking', bookingId: id,
+  }).catch((error) => console.warn('Booking notification unavailable.', bookingDiagnostic(error, 'optional-booking-notification')));
+  return saved;
+}
+
+export async function refreshSparkAvailability(acknowledgedAppointmentIds = []) {
+  if (!auth?.currentUser) throw new Error('Administrator sign-in is required.');
+  return publishSparkAvailability(rtdb, auth.currentUser.uid, {}, { acknowledgedAppointmentIds });
+}
+
+export function listenToSparkBookingState(callback) {
+  return onValue(ref(rtdb, 'sparkBookingControl'), (s) => callback(s.val() || { phase: 'uninitialized' }));
+}
+
+export async function resumeSparkAvailability(acknowledgedAppointmentIds = []) {
+  const controlRef = ref(rtdb, 'sparkBookingControl');
+  await get(controlRef);
+  const reset = await runTransaction(controlRef, (current) => {
+    if (current?.phase === 'publishing' && Date.now() - Number(current.startedAt) < 120000) return undefined;
+    return { phase: 'paused' };
+  }, { applyLocally: false });
+  if (!reset.committed) throw new Error('Publishing is still in progress. Wait two minutes before recovery.');
+  return refreshSparkAvailability(acknowledgedAppointmentIds);
 }
 
 export async function saveBookingAvailability(date, override, acknowledgedAppointmentIds = []) {
-  if (!app || !auth?.currentUser) throw new Error('Please sign in as an administrator.');
+  if (!auth?.currentUser) throw new Error('Administrator sign-in is required.');
   const errors = validateDateOverride(date, override);
   if (errors.length) throw new Error(errors[0]);
-  return requestBookingOperation(auth.currentUser, 'availability', {
-    date, override, acknowledgedAppointmentIds,
-  });
+  return publishSparkAvailability(rtdb, auth.currentUser.uid, (raw) => {
+    const dateOverrides = { ...(raw.dateOverrides || {}) };
+    if (override) dateOverrides[date] = override;
+    else delete dateOverrides[date];
+    return { dateOverrides };
+  }, { date, acknowledgedAppointmentIds });
 }
 
 function getScheduleEntries(snapshot) {
@@ -597,6 +585,9 @@ async function releaseScheduleMutex(lock) {
 }
 
 async function readScheduleDate(date) {
+  const state = (await get(ref(rtdb, 'sparkSchedule'))).val();
+  if (state) return [...Object.values(parseJournal(state.journal)).filter((b) => b.date === date && isSparkBlocking(b.status)),
+    ...JSON.parse(state.legacyBlocks || '[]').filter((b) => b.date === date).map((b, i) => ({ ...b, id: `legacy-block-${i}`, status: 'Confirmed' }))];
   const snapshot = await get(ref(rtdb, `scheduleSlots/${date}`));
   return getScheduleEntries(snapshot);
 }
@@ -616,11 +607,40 @@ async function readBookingsForDate(date) {
   return bookings;
 }
 
+async function updateSparkBookingStatus(bookingId, status) {
+  const normalizedStatus = isCancelledAppointmentStatus(status) ? 'Cancelled' : status;
+  const allowed = ['Pending Confirmation', 'Confirmed', 'Accepted', 'Declined', 'Cancelled', 'Completed', 'No Show'];
+  if (!allowed.includes(normalizedStatus)) throw new Error('Choose a valid appointment status.');
+  const booking = (await readSparkBookings(rtdb)).find((b) => b.id === bookingId);
+  if (!booking) throw new Error('The selected appointment no longer exists.');
+  const uid = getAppointmentCustomerUid(booking);
+  if (normalizedStatus === 'Completed' && !uid) throw new Error('Link this appointment to the correct customer before awarding a visit.');
+  await changeSparkBooking(rtdb, bookingId, normalizedStatus);
+  let rewardGiven = booking.rewardGiven === true;
+  if (normalizedStatus === 'Completed' && !rewardGiven) {
+    let program = null;
+    try { program = (await get(ref(rtdb, 'loyaltyProgram'))).val(); } catch { /* Optional definitions; lifetime visit is still credited. */ }
+    const timestamp = new Date().toISOString();
+    const result = await runTransaction(ref(rtdb, `users/${uid}`), (profile) => {
+      if (profile === null) return null;
+      return applyCompletedBookingReward(profile, bookingId, timestamp, program).profile;
+    }, { applyLocally: false });
+    if (!result.committed || !result.snapshot.exists()) throw new Error('The appointment was completed, but the customer loyalty record could not be updated. Retry completing this appointment to credit it safely.');
+    await update(ref(rtdb, `sparkBookingAdmin/${bookingId}`), { rewardGiven: true, rewardGivenAt: timestamp });
+    rewardGiven = true;
+  }
+  if (normalizedStatus === 'Cancelled' && uid && !isCancelledAppointmentStatus(booking.status)) {
+    void set(ref(rtdb, `notifications/${uid}/${getCancellationNotificationId(bookingId)}`), createAppointmentCancelledNotification({ bookingId, serviceName: getNotificationServiceName(booking), schedule: getNotificationSchedule(booking) })).catch(() => {});
+  }
+  return { status: normalizedStatus, rewardGiven };
+}
+
 export async function updateBookingStatus(bookingId, status) {
   if (!isRealtimeDatabaseAvailable() || !bookingId) {
     return Promise.reject(new Error('Realtime Database is not initialized or booking ID is missing'));
   }
 
+  if ((await get(ref(rtdb, 'sparkBookingControl'))).exists()) return updateSparkBookingStatus(bookingId, status);
   const normalizedStatus = isCancelledAppointmentStatus(status) ? 'Cancelled' : status;
   const updatedAt = new Date().toISOString();
   const updateData = {
@@ -1004,9 +1024,29 @@ function createAppointmentRequestDecisionNotificationPayload(request, approved, 
   };
 }
 
+async function reviewSparkAppointmentRequest(requestId, decision, adminReason) {
+  const request = (await get(ref(rtdb, `appointmentChangeRequests/${requestId}`))).val();
+  if (!request) throw new Error('This request no longer exists.');
+  const booking = (await readSparkBookings(rtdb)).find((b) => b.id === request.bookingId);
+  if (!booking) throw new Error('The related appointment no longer exists.');
+  const approved = decision === 'Approved';
+  await changeSparkBooking(rtdb, booking.id, approved && request.type === 'cancellation' ? 'Cancelled' : null,
+    approved && request.type === 'reschedule' ? { date: request.requestedDate, time: request.requestedTime } : null,
+    { id: requestId, decision });
+  const reviewedAt = new Date().toISOString();
+  // The decision is already canonical in the atomic journal. This projection is retryable.
+  await update(ref(rtdb, `appointmentChangeRequests/${requestId}`), { status: decision, seenByAdmin: true, reviewedAt,
+    reviewedBy: auth.currentUser.uid, adminReason: String(adminReason || '').slice(0, 500) });
+  const notification = createAppointmentRequestDecisionNotificationPayload(request, approved, booking, adminReason);
+  void set(ref(rtdb, `notifications/${request.uid}/${getCancellationNotificationId(booking.id, requestId, decision)}`), notification).catch(() => {});
+  void markAdminNotificationRead(requestId, { handled: true }).catch(() => {});
+  return { status: decision };
+}
+
 export async function reviewAppointmentChangeRequest(requestId, decision, adminReason = '') {
   if (!isRealtimeDatabaseAvailable() || !auth?.currentUser) throw new Error('Admin authentication is required.');
   if (!['Approved', 'Declined'].includes(decision)) throw new Error('Choose a valid request decision.');
+  if ((await get(ref(rtdb, 'sparkBookingControl'))).exists()) return reviewSparkAppointmentRequest(requestId, decision, adminReason);
   const requestRef = ref(rtdb, `appointmentChangeRequests/${requestId}`);
   const requestSnapshot = await get(requestRef);
   if (!requestSnapshot.exists()) throw new Error('This request no longer exists.');
@@ -1234,87 +1274,28 @@ export async function saveBusinessSettings(settings) {
     ...settings,
     updatedAt: new Date().toISOString(),
   };
-  await update(ref(rtdb, 'settings/business'), payload);
+  const result = await publishSparkAvailability(rtdb, auth?.currentUser?.uid, payload);
+  if (result.requiresConfirmation) throw new Error('These hours conflict with existing appointments. Review and acknowledge the affected dates in Availability first.');
   return payload;
 }
 
 export function listenToBookings(callback, errorCallback) {
-  if (!isRealtimeDatabaseAvailable()) {
-    callback([]);
-    return () => {};
-  }
-
-  const bookingsRef = ref(rtdb, 'bookings');
-  const queryRef = rtdbQuery(bookingsRef, orderByChild('createdAt'));
-  return onValue(
-    queryRef,
-    (snapshot) => {
-      const bookings = [];
-      snapshot.forEach((childSnap) => {
-        bookings.push({ id: childSnap.key, ...childSnap.val() });
-      });
-      bookings.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-      callback(bookings);
-    },
-    (error) => {
-      console.warn('Unable to listen for booking updates in Realtime Database', error);
-      if (errorCallback) errorCallback(error);
-    }
-  );
+  if (!isRealtimeDatabaseAvailable()) { callback([]); return () => {}; }
+  return listenSparkBookings(rtdb, null, callback, errorCallback);
 }
 
 export function listenToScheduleDate(date, callback, errorCallback) {
-  if (!date || !isRealtimeDatabaseAvailable()) {
-    callback([]);
-    return () => {};
-  }
-
-  return onValue(
-    ref(rtdb, `scheduleSlots/${date}`),
-    (snapshot) => callback(getScheduleEntries(snapshot)),
-    (error) => {
-      console.warn('Unable to listen for schedule availability.', error);
-      if (errorCallback) errorCallback(error);
-    }
-  );
+  if (!date || !isRealtimeDatabaseAvailable()) { callback([]); return () => {}; }
+  return listenSparkSchedule(rtdb, (key) => key === date, callback, errorCallback);
 }
 
 export function listenToScheduleMonth(monthKey, callback, errorCallback) {
-  if (!/^\d{4}-\d{2}$/.test(String(monthKey || '')) || !isRealtimeDatabaseAvailable()) {
-    callback([]);
-    return () => {};
-  }
-
-  const monthQuery = rtdbQuery(
-    ref(rtdb, 'scheduleSlots'),
-    orderByKey(),
-    startAt(`${monthKey}-01`),
-    endAt(`${monthKey}-31`)
-  );
-
-  return onValue(
-    monthQuery,
-    (snapshot) => {
-      const entries = [];
-      snapshot.forEach((dateSnapshot) => {
-        dateSnapshot.forEach((entrySnapshot) => {
-          entries.push({
-            bookingId: entrySnapshot.key,
-            date: dateSnapshot.key,
-            ...entrySnapshot.val(),
-          });
-        });
-      });
-      callback(entries);
-    },
-    (error) => {
-      console.warn('Unable to listen for monthly schedule availability.', error);
-      if (errorCallback) errorCallback(error);
-    }
-  );
+  if (!isRealtimeDatabaseAvailable()) { callback([]); return () => {}; }
+  return listenSparkSchedule(rtdb, (key) => key.startsWith(`${monthKey}-`), callback, errorCallback);
 }
 
 export async function syncConfirmedScheduleSlots(bookings = []) {
+  if ((await get(ref(rtdb, 'sparkBookingControl'))).exists()) return true;
   if (!isRealtimeDatabaseAvailable() || !Array.isArray(bookings)) return false;
 
   const updates = {};
@@ -1363,7 +1344,8 @@ export async function markBookingSeen(bookingId) {
 
   const updateData = { seenByAdmin: true, updatedAt: new Date().toISOString() };
   try {
-    const bookingRef = ref(rtdb, `bookings/${bookingId}`);
+    const spark = (await get(ref(rtdb, 'sparkBookingControl'))).exists();
+    const bookingRef = ref(rtdb, `${spark ? 'sparkBookingAdmin' : 'bookings'}/${bookingId}`);
     await update(bookingRef, updateData);
     return true;
   } catch (error) {
@@ -1947,28 +1929,8 @@ export async function updateUserStatus(uid, status) {
 }
 
 export function listenToUserBookings(uid, callback, errorCallback) {
-  if (!uid || !isRealtimeDatabaseAvailable()) {
-    callback([]);
-    return () => {};
-  }
-
-  const bookingsRef = ref(rtdb, 'bookings');
-  const userBookingsQuery = rtdbQuery(bookingsRef, orderByChild('uid'), equalTo(uid));
-  return onValue(
-    userBookingsQuery,
-    (snapshot) => {
-      const bookings = [];
-      snapshot.forEach((childSnapshot) => {
-        bookings.push({ id: childSnapshot.key, ...childSnapshot.val() });
-      });
-      bookings.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-      callback(bookings);
-    },
-    (error) => {
-      console.warn('Unable to listen for customer booking updates', error);
-      if (errorCallback) errorCallback(error);
-    }
-  );
+  if (!uid || !isRealtimeDatabaseAvailable()) { callback([]); return () => {}; }
+  return listenSparkBookings(rtdb, uid, callback, errorCallback);
 }
 
 export function listenToCustomerNotifications(uid, callback, errorCallback) {
@@ -2037,47 +1999,13 @@ export async function updateAppointmentReminderPreference(uid, enabled) {
 }
 
 export async function getUserBookings(uid) {
-  if (!uid) return [];
-
-  if (!isRealtimeDatabaseAvailable()) {
-    console.warn('Realtime Database is not initialized. getUserBookings will return an empty array.');
-    return [];
-  }
-
-  try {
-    const bookingsRef = ref(rtdb, 'bookings');
-    const userBookingsQuery = rtdbQuery(bookingsRef, orderByChild('uid'), equalTo(uid));
-    const snap = await get(userBookingsQuery);
-    if (!snap.exists()) return [];
-    const bookings = [];
-    snap.forEach((childSnap) => {
-      bookings.push({ id: childSnap.key, ...childSnap.val() });
-    });
-    return bookings.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-  } catch (error) {
-    console.warn('Failed to fetch user bookings from Realtime Database', error);
-    return [];
-  }
+  if (!uid || !isRealtimeDatabaseAvailable()) return [];
+  return readSparkBookings(rtdb, uid);
 }
 
 export async function getBookings() {
-  if (!isRealtimeDatabaseAvailable()) {
-    console.warn('Realtime Database is not initialized. getBookings will return an empty array.');
-    return [];
-  }
-
-  try {
-    const snap = await get(ref(rtdb, 'bookings'));
-    if (!snap.exists()) return [];
-    const bookings = [];
-    snap.forEach((childSnap) => {
-      bookings.push({ id: childSnap.key, ...childSnap.val() });
-    });
-    return bookings.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-  } catch (error) {
-    console.warn('Failed to fetch bookings from Realtime Database', error);
-    return [];
-  }
+  if (!isRealtimeDatabaseAvailable()) return [];
+  return readSparkBookings(rtdb);
 }
 
 export default { initFirebase, saveBooking, listenToBookings, markBookingSeen, updateBookingStatus };

@@ -1,0 +1,40 @@
+{
+  "database": {
+    "rules": "database.managed.rules.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "functions": {
+    "source": "functions",
+    "codebase": "booking",
+    "ignore": [
+      "node_modules",
+      ".git",
+      "firebase-debug.log",
+      "firebase-debug.*.log",
+      ".env*",
+      "index.js",
+      "passwordResetCore.js",
+      "appointmentReminderCore.js"
+    ]
+  },
+  "emulators": {
+    "functions": {
+      "host": "127.0.0.1",
+      "port": 5001
+    },
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 9099
+    },
+    "database": {
+      "host": "127.0.0.1",
+      "port": 9000
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
+  }
+}

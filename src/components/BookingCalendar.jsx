@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createBookingId, getCustomerProfile, getImageUploadErrorMessage, listenToScheduleMonth, requestAppointmentReschedule, saveBooking } from '../firebase';
+import { createBookingId, getCustomerProfile, getImageUploadErrorMessage, listenToScheduleMonth, listenToSparkBookingState, requestAppointmentReschedule, saveBooking } from '../firebase';
 import { bookingDiagnostic, bookingErrorMessage } from '../../functions/shared/bookingErrors.js';
 import { SERVICES, formatPeso } from '../constants/services';
 import { isValidPhoneNumber } from '../validation';
@@ -98,6 +98,10 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
   const [availabilityLoading, setAvailabilityLoading] = useState(true);
   const [availabilityError, setAvailabilityError] = useState('');
   const [availabilityClock, setAvailabilityClock] = useState(Date.now());
+  const [bookingPublication, setBookingPublication] = useState(null);
+  useEffect(() => user?.uid ? listenToSparkBookingState(setBookingPublication) : undefined, [user?.uid]);
+  const publishedDate = !date || (new Date(`${date}T00:00:00+08:00`).getTime() < (bookingPublication?.windowEnds || 0));
+  const bookingPaused = !rescheduleBooking && bookingPublication != null && (bookingPublication.phase !== 'ready' || !publishedDate || availabilityClock < (bookingPublication.holdUntil || 0));
 
   useEffect(() => {
     if (!user) return;
@@ -418,7 +422,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
       } else {
         savedBooking = await saveBooking(bookingPayload);
       }
-      setSubmittedBooking({ ...bookingPayload, ...savedBooking, referenceImageFile: undefined, onReferenceUploadProgress: undefined, status: rescheduleBooking ? 'Confirmed' : 'Pending Confirmation' });
+      setSubmittedBooking({ ...bookingPayload, ...savedBooking, referenceImageFile: undefined, onReferenceUploadProgress: undefined, status: savedBooking?.status || (rescheduleBooking ? 'Confirmed' : 'Pending Confirmation') });
       setBookingConfirmed(true);
       setStatus(null);
       setToast(null);
@@ -428,6 +432,7 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
       const isConflict = saveError?.code === SCHEDULE_CONFLICT_CODE || String(saveError?.code || '').includes('already-exists');
       const message = isConflict
         ? conflictMessage
+        : saveError?.code === 'booking/reference-photo' ? saveError.message
         : String(saveError?.code || '').startsWith('storage/')
           ? getImageUploadErrorMessage(saveError)
         : rescheduleBooking
@@ -710,11 +715,12 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
             <div className="review-row total"><span>Estimated total</span><strong>{selected ? formatPeso(totalPrice) : '--'}</strong></div>
           </div>
 
+          {bookingPaused ? <div className="booking-status" role="status">Online booking is temporarily unavailable for this date. Please contact the salon.</div> : null}
           {error ? <div className="booking-status booking-error" role="alert">{error}</div> : status ? <div className="booking-status" role="status">{status}</div> : null}
 
           <div className="step-nav">
             {step > 0 ? <button type="button" className="btn-ghost" onClick={back} disabled={isSaving}>Back</button> : null}
-            <button type="button" className="btn-primary" disabled={(step < STEPS.length - 1 && !canNext) || isSaving} onClick={step === STEPS.length - 1 ? handleConfirm : next} aria-busy={isSaving}>
+            <button type="button" className="btn-primary" disabled={(step < STEPS.length - 1 && !canNext) || isSaving || (step === STEPS.length - 1 && bookingPaused)} onClick={step === STEPS.length - 1 ? handleConfirm : next} aria-busy={isSaving}>
               {isSaving
                 ? referenceUploadProgress > 0 && referenceUploadProgress < 100
                   ? `Uploading photo ${referenceUploadProgress}%`

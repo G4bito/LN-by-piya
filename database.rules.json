@@ -5,12 +5,14 @@
     "portfolio": {
       ".read": true,
       ".write": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'",
-      ".indexOn": ["position"]
+      ".indexOn": [
+        "position"
+      ]
     },
     "settings": {
       "business": {
         ".read": true,
-        ".write": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'",
+        ".write": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') && (!root.child('sparkBookingControl').exists() || (root.child('sparkBookingControl').child('phase').val() == 'publishing'))",
         "businessName": {
           ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 100)"
         },
@@ -36,28 +38,50 @@
           ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 500) || newData.hasChildren(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'])",
           "$day": {
             ".validate": "($day == 'monday' || $day == 'tuesday' || $day == 'wednesday' || $day == 'thursday' || $day == 'friday' || $day == 'saturday' || $day == 'sunday') && newData.hasChildren(['open', 'openTime', 'closeTime'])",
-            "open": { ".validate": "newData.isBoolean()" },
-            "openTime": { ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)" },
-            "closeTime": { ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)" },
-            "$other": { ".validate": false }
+            "open": {
+              ".validate": "newData.isBoolean()"
+            },
+            "openTime": {
+              ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)"
+            },
+            "closeTime": {
+              ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)"
+            },
+            "$other": {
+              ".validate": false
+            }
           }
         },
         "onlineBookingHours": {
           ".validate": "!newData.exists() || newData.hasChildren(['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'])",
           "$day": {
             ".validate": "($day == 'monday' || $day == 'tuesday' || $day == 'wednesday' || $day == 'thursday' || $day == 'friday' || $day == 'saturday' || $day == 'sunday') && newData.hasChildren(['open', 'openTime', 'closeTime'])",
-            "open": { ".validate": "newData.isBoolean()" },
-            "openTime": { ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)" },
-            "closeTime": { ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)" },
-            "$other": { ".validate": false }
+            "open": {
+              ".validate": "newData.isBoolean()"
+            },
+            "openTime": {
+              ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)"
+            },
+            "closeTime": {
+              ".validate": "newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)"
+            },
+            "$other": {
+              ".validate": false
+            }
           }
         },
         "blackoutDates": {
           "$date": {
             ".validate": "newData.hasChildren(['date', 'reason']) && newData.child('date').val() == $date",
-            "date": { ".validate": "newData.isString() && newData.val().matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)" },
-            "reason": { ".validate": "newData.isString() && newData.val().length <= 120" },
-            "$other": { ".validate": false }
+            "date": {
+              ".validate": "newData.isString() && newData.val().matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)"
+            },
+            "reason": {
+              ".validate": "newData.isString() && newData.val().length <= 120"
+            },
+            "$other": {
+              ".validate": false
+            }
           }
         },
         "timezone": {
@@ -116,7 +140,9 @@
         },
         "nailArtEligibleServiceIds": {
           ".validate": "!newData.exists() || newData.hasChildren()",
-          "$index": { ".validate": "$index.matches(/^([0-9]|1[0-9])$/) && newData.isString() && newData.val().length > 0 && newData.val().length <= 100" }
+          "$index": {
+            ".validate": "$index.matches(/^([0-9]|1[0-9])$/) && newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+          }
         },
         "allowReferencePhoto": {
           ".validate": "!newData.exists() || newData.isBoolean()"
@@ -193,9 +219,14 @@
     },
     "bookings": {
       ".read": "auth != null && ((root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (root.child('users').child(auth.uid).child('status').val() == 'active' && query.orderByChild == 'uid' && query.equalTo == auth.uid))",
-      ".indexOn": ["createdAt", "uid", "date", "status"],
+      ".indexOn": [
+        "createdAt",
+        "uid",
+        "date",
+        "status"
+      ],
       "$bookingId": {
-        ".write": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'",
+        ".write": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') && !root.child('sparkBookingControl').exists()",
         ".validate": "data.exists() ? (newData.child('uid').val() == data.child('uid').val() && newData.child('email').val() == data.child('email').val()) : (newData.hasChildren(['uid', 'email', 'status', 'seenByAdmin', 'createdAt']) && newData.child('uid').isString() && newData.child('email').isString() && newData.child('status').isString() && newData.child('seenByAdmin').isBoolean() && newData.child('createdAt').isString())",
         "uid": {
           ".validate": "newData.isString() && (data.exists() ? newData.val() == data.val() : newData.val() == auth.uid)"
@@ -207,10 +238,10 @@
     },
     "scheduleSlots": {
       ".read": "auth != null",
-      ".write": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'",
+      ".write": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') && !root.child('sparkBookingControl').exists()",
       "$dateKey": {
         "$bookingId": {
-          ".write": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'",
+          ".write": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') && !root.child('sparkBookingControl').exists()",
           ".validate": "!newData.exists() || (newData.hasChildren(['bookingId', 'ownerUid', 'date', 'time', 'serviceId', 'durationMinutes', 'startMinutes', 'endMinutes', 'status', 'updatedAt']) && newData.child('bookingId').val() == $bookingId && newData.child('date').val() == $dateKey && newData.child('ownerUid').isString() && newData.child('time').isString() && newData.child('serviceId').isString() && newData.child('durationMinutes').isNumber() && newData.child('durationMinutes').val() > 0 && newData.child('durationMinutes').val() <= 480 && newData.child('startMinutes').isNumber() && newData.child('endMinutes').isNumber() && newData.child('endMinutes').val() > newData.child('startMinutes').val() && (newData.child('status').val() == 'Pending' || newData.child('status').val() == 'Pending Confirmation' || newData.child('status').val() == 'Confirmed') && newData.child('updatedAt').isString() && (newData.child('status').val() != 'Pending' || (newData.child('expiresAt').isNumber() && newData.child('expiresAt').val() > now)))"
         }
       }
@@ -218,23 +249,30 @@
     "scheduleMutexes": {
       "$dateKey": {
         ".read": "auth != null",
-        ".write": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'",
+        ".write": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') && !root.child('sparkBookingControl').exists()",
         ".validate": "!newData.exists() || (newData.hasChildren(['ownerUid', 'token', 'expiresAt']) && newData.child('ownerUid').isString() && newData.child('token').isString() && newData.child('expiresAt').isNumber())"
       }
     },
     "appointmentChangeRequests": {
       ".read": "auth != null && ((root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (root.child('users').child(auth.uid).child('status').val() == 'active' && query.orderByChild == 'uid' && query.equalTo == auth.uid))",
-      ".indexOn": ["uid", "status", "createdAt"],
+      ".indexOn": [
+        "uid",
+        "status",
+        "createdAt"
+      ],
       "$requestId": {
-        ".write": "auth != null && ((root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (!data.exists() && newData.exists() && root.child('users').child(auth.uid).child('status').val() == 'active' && newData.child('uid').val() == auth.uid && newData.child('status').val() == 'Pending' && newData.child('seenByAdmin').val() == false && newData.child('createdAt').val() <= now && newData.child('createdAt').val() >= now - 60000 && root.child('bookings').child(newData.child('bookingId').val()).child('uid').val() == auth.uid && root.child('bookings').child(newData.child('bookingId').val()).child('status').val() == 'Confirmed' && ((newData.child('type').val() == 'cancellation' && root.child('settings').child('business').child('allowCustomerCancellation').val() == true && root.child('settings').child('business').child('requireAdminApprovalForCancellation').val() != false) || (newData.child('type').val() == 'reschedule' && root.child('settings').child('business').child('allowCustomerReschedule').val() == true))))",
-        ".validate": "!newData.exists() || (newData.hasChildren(['id', 'bookingId', 'uid', 'type', 'status', 'reason', 'createdAt', 'seenByAdmin']) && newData.child('id').val() == $requestId && newData.child('bookingId').isString() && newData.child('uid').isString() && root.child('bookings').child(newData.child('bookingId').val()).child('uid').val() == newData.child('uid').val() && (newData.child('type').val() == 'cancellation' || newData.child('type').val() == 'reschedule') && (newData.child('status').val() == 'Pending' || newData.child('status').val() == 'Approved' || newData.child('status').val() == 'Declined') && newData.child('reason').isString() && newData.child('reason').val().length <= 500 && newData.child('createdAt').isNumber() && newData.child('seenByAdmin').isBoolean() && (newData.child('type').val() != 'reschedule' || (newData.child('requestedDate').isString() && newData.child('requestedDate').val().matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/) && newData.child('requestedTime').isString() && newData.child('requestedTime').val().length <= 20)) && (!newData.child('reviewedAt').exists() || newData.child('reviewedAt').isString()) && (!newData.child('reviewedBy').exists() || newData.child('reviewedBy').isString()) && (!newData.child('adminReason').exists() || (newData.child('adminReason').isString() && newData.child('adminReason').val().length <= 500)))"
+        ".write": "auth != null && ((root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (!data.exists() && newData.exists() && root.child('users').child(auth.uid).child('status').val() == 'active' && newData.child('uid').val() == auth.uid && newData.child('status').val() == 'Pending' && newData.child('seenByAdmin').val() == false && newData.child('createdAt').val() <= now && newData.child('createdAt').val() >= now - 60000 && (root.child('bookings').child(newData.child('bookingId').val()).child('uid').val() == auth.uid || (root.child('sparkBookingDetails').child(newData.child('bookingId').val()).child('uid').val() == auth.uid && root.child('sparkSchedule').child('journal').val().contains('|' + newData.child('bookingId').val() + '|'))) && (root.child('bookings').child(newData.child('bookingId').val()).child('status').val() == 'Confirmed' || root.child('sparkBookingDetails').child(newData.child('bookingId').val()).exists()) && ((newData.child('type').val() == 'cancellation' && root.child('settings').child('business').child('allowCustomerCancellation').val() == true && root.child('settings').child('business').child('requireAdminApprovalForCancellation').val() != false) || (newData.child('type').val() == 'reschedule' && root.child('settings').child('business').child('allowCustomerReschedule').val() == true))))",
+        ".validate": "!newData.exists() || (newData.hasChildren(['id', 'bookingId', 'uid', 'type', 'status', 'reason', 'createdAt', 'seenByAdmin']) && newData.child('id').val() == $requestId && newData.child('bookingId').isString() && newData.child('uid').isString() && (root.child('bookings').child(newData.child('bookingId').val()).child('uid').val() == newData.child('uid').val() || root.child('sparkBookingDetails').child(newData.child('bookingId').val()).child('uid').val() == newData.child('uid').val()) && (newData.child('type').val() == 'cancellation' || newData.child('type').val() == 'reschedule') && (newData.child('status').val() == 'Pending' || newData.child('status').val() == 'Approved' || newData.child('status').val() == 'Declined') && newData.child('reason').isString() && newData.child('reason').val().length <= 500 && newData.child('createdAt').isNumber() && newData.child('seenByAdmin').isBoolean() && (newData.child('type').val() != 'reschedule' || (newData.child('requestedDate').isString() && newData.child('requestedDate').val().matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/) && newData.child('requestedTime').isString() && newData.child('requestedTime').val().length <= 20)) && (!newData.child('reviewedAt').exists() || newData.child('reviewedAt').isString()) && (!newData.child('reviewedBy').exists() || newData.child('reviewedBy').isString()) && (!newData.child('adminReason').exists() || (newData.child('adminReason').isString() && newData.child('adminReason').val().length <= 500)))",
+        ".read": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || ((auth != null && root.child('users').child(auth.uid).child('status').val() == 'active') && (!data.exists() || data.child('uid').val() == auth.uid))"
       }
     },
     "adminNotifications": {
       ".read": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'",
-      ".indexOn": ["createdAt"],
+      ".indexOn": [
+        "createdAt"
+      ],
       "$notificationId": {
-        ".write": "auth != null && ((root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (!data.exists() && newData.exists() && root.child('users').child(auth.uid).child('status').val() == 'active' && newData.child('targetId').val() == $notificationId && newData.child('createdBy').val() == auth.uid && newData.child('read').val() == false && newData.child('handled').val() == false && newData.child('createdAt').val() <= now && newData.child('createdAt').val() >= now - 60000 && ((newData.child('type').val() == 'new_booking' && newData.child('targetType').val() == 'booking' && newData.child('bookingId').val() == $notificationId && root.child('bookings').child($notificationId).child('uid').val() == auth.uid && root.child('bookings').child($notificationId).child('status').val() == 'Pending Confirmation') || ((newData.child('type').val() == 'cancellation_request' || newData.child('type').val() == 'reschedule_request') && newData.child('targetType').val() == 'appointment_request' && newData.child('requestId').val() == $notificationId && root.child('appointmentChangeRequests').child($notificationId).child('uid').val() == auth.uid && root.child('appointmentChangeRequests').child($notificationId).child('bookingId').val() == newData.child('bookingId').val() && root.child('appointmentChangeRequests').child($notificationId).child('status').val() == 'Pending' && ((newData.child('type').val() == 'cancellation_request' && root.child('appointmentChangeRequests').child($notificationId).child('type').val() == 'cancellation') || (newData.child('type').val() == 'reschedule_request' && root.child('appointmentChangeRequests').child($notificationId).child('type').val() == 'reschedule'))))))",
+        ".write": "auth != null && ((root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (!data.exists() && newData.exists() && root.child('users').child(auth.uid).child('status').val() == 'active' && newData.child('targetId').val() == $notificationId && newData.child('createdBy').val() == auth.uid && newData.child('read').val() == false && newData.child('handled').val() == false && newData.child('createdAt').val() <= now && newData.child('createdAt').val() >= now - 60000 && ((newData.child('type').val() == 'new_booking' && newData.child('targetType').val() == 'booking' && newData.child('bookingId').val() == $notificationId && ((root.child('bookings').child($notificationId).child('uid').val() == auth.uid && root.child('bookings').child($notificationId).child('status').val() == 'Pending Confirmation') || (root.child('sparkBookingDetails').child($notificationId).child('uid').val() == auth.uid && root.child('sparkSchedule').child('journal').val().contains('|' + $notificationId + '|')))) || ((newData.child('type').val() == 'cancellation_request' || newData.child('type').val() == 'reschedule_request') && newData.child('targetType').val() == 'appointment_request' && newData.child('requestId').val() == $notificationId && root.child('appointmentChangeRequests').child($notificationId).child('uid').val() == auth.uid && root.child('appointmentChangeRequests').child($notificationId).child('bookingId').val() == newData.child('bookingId').val() && root.child('appointmentChangeRequests').child($notificationId).child('status').val() == 'Pending' && ((newData.child('type').val() == 'cancellation_request' && root.child('appointmentChangeRequests').child($notificationId).child('type').val() == 'cancellation') || (newData.child('type').val() == 'reschedule_request' && root.child('appointmentChangeRequests').child($notificationId).child('type').val() == 'reschedule'))))))",
         ".validate": "!newData.exists() || (newData.hasChildren(['type', 'title', 'message', 'read', 'handled', 'createdAt', 'createdBy', 'targetType', 'targetId', 'bookingId']) && (newData.child('type').val() == 'new_booking' || newData.child('type').val() == 'cancellation_request' || newData.child('type').val() == 'reschedule_request' || newData.child('type').val() == 'reminder_failure' || newData.child('type').val() == 'email_failure' || newData.child('type').val() == 'customer_signup' || newData.child('type').val() == 'reward_available') && ((newData.child('type').val() == 'new_booking' && newData.child('title').val() == 'New Booking') || (newData.child('type').val() == 'cancellation_request' && newData.child('title').val() == 'Cancellation Request') || (newData.child('type').val() == 'reschedule_request' && newData.child('title').val() == 'Reschedule Request') || (newData.child('type').val() != 'new_booking' && newData.child('type').val() != 'cancellation_request' && newData.child('type').val() != 'reschedule_request' && newData.child('title').isString())) && newData.child('title').val().length <= 100 && newData.child('message').isString() && newData.child('message').val().length <= 500 && newData.child('read').isBoolean() && newData.child('handled').isBoolean() && newData.child('createdAt').isNumber() && newData.child('createdBy').isString() && newData.child('targetType').isString() && newData.child('targetId').val() == $notificationId && newData.child('bookingId').isString() && (!newData.child('requestId').exists() || newData.child('requestId').isString()) && (!newData.child('readAt').exists() || newData.child('readAt').isNumber()) && (!newData.child('handledAt').exists() || newData.child('handledAt').isNumber()))"
       }
     },
@@ -282,7 +320,9 @@
     "notifications": {
       "$uid": {
         ".read": "auth != null && auth.uid == $uid && root.child('users').child(auth.uid).child('status').val() == 'active'",
-        ".indexOn": ["createdAt"],
+        ".indexOn": [
+          "createdAt"
+        ],
         "$notificationId": {
           ".write": "auth != null && ((root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (auth.uid == $uid && !data.exists() && newData.exists() && newData.child('read').val() == false && newData.child('requestId').val() == $notificationId && root.child('appointmentChangeRequests').child($notificationId).child('uid').val() == auth.uid && root.child('appointmentChangeRequests').child($notificationId).child('status').val() == 'Pending' && ((newData.child('type').val() == 'cancellation_request_sent' && root.child('appointmentChangeRequests').child($notificationId).child('type').val() == 'cancellation') || (newData.child('type').val() == 'reschedule_request_sent' && root.child('appointmentChangeRequests').child($notificationId).child('type').val() == 'reschedule'))) || (auth.uid == $uid && data.exists() && newData.exists() && newData.child('read').val() == true && newData.child('type').val() == data.child('type').val() && newData.child('title').val() == data.child('title').val() && newData.child('message').val() == data.child('message').val() && newData.child('bookingId').val() == data.child('bookingId').val() && newData.child('requestId').val() == data.child('requestId').val() && newData.child('reminderType').val() == data.child('reminderType').val() && newData.child('appointmentAt').val() == data.child('appointmentAt').val() && newData.child('timeZone').val() == data.child('timeZone').val() && newData.child('createdAt').val() == data.child('createdAt').val()))",
           ".validate": "newData.hasChildren(['type', 'title', 'message', 'bookingId', 'read', 'createdAt']) && (newData.child('type').val() == 'appointment_reminder' || newData.child('type').val() == 'booking_cancelled' || newData.child('type').val() == 'booking_rescheduled' || newData.child('type').val() == 'cancellation_request_declined' || newData.child('type').val() == 'cancellation_request_sent' || newData.child('type').val() == 'reschedule_request_sent') && newData.child('title').isString() && newData.child('message').isString() && newData.child('bookingId').isString() && newData.child('read').isBoolean() && (newData.child('createdAt').isNumber() || newData.child('createdAt').isString()) && (!newData.child('requestId').exists() || newData.child('requestId').isString()) && (!newData.child('readAt').exists() || (newData.child('readAt').isNumber() && newData.child('readAt').val() <= now))"
@@ -304,6 +344,220 @@
         "status": {
           ".validate": "(!data.exists() && newData.val() == 'active') || newData.val() == data.val()"
         }
+      }
+    },
+    "sparkBookingControl": {
+      ".read": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (auth != null && root.child('users').child(auth.uid).child('status').val() == 'active')",
+      ".write": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'"
+    },
+    "sparkBookingPolicy": {
+      ".read": true,
+      ".write": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') && (root.child('sparkBookingControl').child('phase').val() == 'publishing')"
+    },
+    "sparkBookingCatalog": {
+      ".read": true,
+      ".write": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') && (root.child('sparkBookingControl').child('phase').val() == 'publishing')"
+    },
+    "sparkBookingCalendar": {
+      ".read": true,
+      ".write": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') && (root.child('sparkBookingControl').child('phase').val() == 'publishing')"
+    },
+    "sparkSchedule": {
+      ".read": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (auth != null && root.child('users').child(auth.uid).child('status').val() == 'active')",
+      ".write": "newData.exists() && (((auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') && ((root.child('sparkBookingControl').child('phase').val() == 'ready') || ((root.child('sparkBookingControl').child('phase').val() == 'publishing') && newData.child('publicationToken').val() == root.child('sparkBookingControl').child('token').val() && newData.child('lastEvent').child('type').val() == 'publish'))) || ((auth != null && root.child('users').child(auth.uid).child('status').val() == 'active') && (root.child('sparkBookingControl').child('phase').val() == 'ready')))",
+      ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (data.exists() && newData.hasChildren(['version','origin','days','buffer','legacyBlocks','legacyHoldUntil','occupied','capacity','journal','lastEvent','proof']) && newData.child('version').val() == data.child('version').val() && newData.child('origin').val() == data.child('origin').val() && newData.child('days').val() == data.child('days').val() && newData.child('buffer').val() == data.child('buffer').val() && newData.child('legacyBlocks').val() == data.child('legacyBlocks').val() && newData.child('legacyHoldUntil').val() == data.child('legacyHoldUntil').val() && newData.child('publicationToken').val() == data.child('publicationToken').val() && newData.child('occupied').isString() && newData.child('capacity').isString() && newData.child('journal').isString() && newData.child('lastEvent').child('type').val() == 'book' && newData.child('lastEvent').child('id').isString() && newData.child('lastEvent').child('id').val().matches(/^[A-Za-z0-9_-]{1,128}$/) && !data.child('journal').val().contains('|' + newData.child('lastEvent').child('id').val() + '|') && !root.child('bookings').child(newData.child('lastEvent').child('id').val()).exists() && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('uid').val() == auth.uid && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('id').val() == newData.child('lastEvent').child('id').val() && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('date').val() == newData.child('lastEvent').child('date').val() && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('time').val() == newData.child('lastEvent').child('time').val() && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('service').val() == newData.child('lastEvent').child('service').val() && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('startMinutes').val() == newData.child('lastEvent').child('start').val() && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('durationMinutes').val() == newData.child('lastEvent').child('duration').val() && newData.child('lastEvent').child('duration').val() == root.child('sparkBookingCatalog').child(newData.child('lastEvent').child('service').val()).child('durationMinutes').val() && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('basePrice').val() == root.child('sparkBookingCatalog').child(newData.child('lastEvent').child('service').val()).child('price').val() && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('baseTotal').val() == root.child('sparkBookingCatalog').child(newData.child('lastEvent').child('service').val()).child('price').val() * (root.child('sparkBookingCatalog').child(newData.child('lastEvent').child('service').val()).child('perNail').val() == true ? root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('nailQuantity').val() : 1) && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('totalPrice').val() == root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('baseTotal').val() + root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('nailArt/total').val() && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('estimatedTotal').val() == root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('totalPrice').val() && newData.child('lastEvent').child('price').val() == root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('totalPrice').val() && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('nailArt/pricePerNail').val() == root.child('sparkBookingPolicy').child('nailArtPrice').val() && (root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('nailArt/enabled').val() == true ? (root.child('sparkBookingCatalog').child(newData.child('lastEvent').child('service').val()).child('nailArt').val() == true && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('nailArt/quantity').val() >= 1 && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('nailArt/quantity').val() <= root.child('sparkBookingPolicy').child('nailArtMaximum').val() && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('nailArt/total').val() == root.child('sparkBookingPolicy').child('nailArtPrice').val() * root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('nailArt/quantity').val()) : (root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('nailArt/quantity').val() == 0 && root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('nailArt/total').val() == 0)) && (root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('referenceImageUrl').val() == '' || root.child('sparkBookingPolicy').child('allowPhoto').val() == true) && newData.child('lastEvent').child('createdAt').val() == root.child('sparkBookingDetails').child(newData.child('lastEvent').child('id').val()).child('createdAt').val() && newData.child('lastEvent').child('committedAt').isNumber() && newData.child('lastEvent').child('committedAt').val() <= now && newData.child('lastEvent').child('committedAt').val() >= now - 60000 && now >= data.child('legacyHoldUntil').val() && data.child('buffer').val() == root.child('sparkBookingPolicy').child('buffer').val() && ((root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('dayStart').val() - data.child('origin').val()) / 86400000) >= 0 && ((root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('dayStart').val() - data.child('origin').val()) / 86400000) < data.child('days').val() && ((root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('dayStart').val() - data.child('origin').val()) / 86400000) % 1 == 0 && root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('dayStart').val() >= now - ((now + 28800000) % 86400000) && root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('dayStart').val() <= now - ((now + 28800000) % 86400000) + root.child('sparkBookingPolicy').child('advance').val() * 86400000 && (root.child('sparkBookingPolicy').child('sameDay').val() == true || root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('dayStart').val() > now - ((now + 28800000) % 86400000)) && root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('dayStart').val() + newData.child('lastEvent').child('start').val() * 60000 >= now + root.child('sparkBookingPolicy').child('notice').val() * 3600000 && root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('starts').child(newData.child('lastEvent').child('time').val()).val() == newData.child('lastEvent').child('start').val() && (newData.child('lastEvent').child('duration').val() + data.child('buffer').val()) <= root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('limits').child(newData.child('lastEvent').child('time').val()).val() && newData.child('lastEvent').child('start').val() >= 0 && newData.child('lastEvent').child('start').val() + (newData.child('lastEvent').child('duration').val() + data.child('buffer').val()) <= 1440 && newData.child('proof').child('before').val().length == ((root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('dayStart').val() - data.child('origin').val()) / 86400000) * 1440 + newData.child('lastEvent').child('start').val() && newData.child('proof').child('free').val().length == (newData.child('lastEvent').child('duration').val() + data.child('buffer').val()) && newData.child('proof').child('free').val().matches(/^0+$/) && newData.child('proof').child('claim').val().length == (newData.child('lastEvent').child('duration').val() + data.child('buffer').val()) && newData.child('proof').child('claim').val().matches(/^1+$/) && data.child('occupied').val() == newData.child('proof').child('before').val() + newData.child('proof').child('free').val() + newData.child('proof').child('after').val() && newData.child('occupied').val() == newData.child('proof').child('before').val() + newData.child('proof').child('claim').val() + newData.child('proof').child('after').val() && newData.child('proof').child('availableBefore').val().length == newData.child('lastEvent').child('start').val() && root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('allowed').val() == newData.child('proof').child('availableBefore').val() + newData.child('proof').child('claim').val() + newData.child('proof').child('availableAfter').val() && newData.child('lastEvent').child('token').val() % 1 == 0 && newData.child('lastEvent').child('token').val() >= ((root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('dayStart').val() - data.child('origin').val()) / 86400000) * 100 && newData.child('lastEvent').child('token').val() < ((root.child('sparkBookingCalendar').child(newData.child('lastEvent').child('date').val()).child('dayStart').val() - data.child('origin').val()) / 86400000) * 100 + root.child('sparkBookingPolicy').child('capacity').val() && newData.child('proof').child('capacityBefore').val().length == newData.child('lastEvent').child('token').val() && data.child('capacity').val() == newData.child('proof').child('capacityBefore').val() + '0' + newData.child('proof').child('capacityAfter').val() && newData.child('capacity').val() == newData.child('proof').child('capacityBefore').val() + '1' + newData.child('proof').child('capacityAfter').val() && newData.child('journal').val().length <= 4000000 && newData.child('journal').val() == data.child('journal').val() + 'B|' + newData.child('lastEvent').child('id').val() + '|' + newData.child('lastEvent').child('date').val() + '|' + newData.child('lastEvent').child('time').val() + '|' + newData.child('lastEvent').child('service').val() + '|' + newData.child('lastEvent').child('start').val() + '|' + newData.child('lastEvent').child('duration').val() + '|' + newData.child('lastEvent').child('price').val() + '|Pending Confirmation|' + newData.child('lastEvent').child('createdAt').val() + '\\n')",
+      "version": {
+        ".validate": true
+      },
+      "origin": {
+        ".validate": true
+      },
+      "days": {
+        ".validate": true
+      },
+      "buffer": {
+        ".validate": true
+      },
+      "legacyBlocks": {
+        ".validate": true
+      },
+      "legacyHoldUntil": {
+        ".validate": true
+      },
+      "publicationToken": {
+        ".validate": true
+      },
+      "occupied": {
+        ".validate": true
+      },
+      "capacity": {
+        ".validate": true
+      },
+      "journal": {
+        ".validate": true
+      },
+      "lastEvent": {
+        ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.hasChildren(['type','id','date','time','service','start','duration','price','token','createdAt','committedAt']))",
+        "type": {
+          ".validate": true
+        },
+        "id": {
+          ".validate": true
+        },
+        "date": {
+          ".validate": true
+        },
+        "time": {
+          ".validate": true
+        },
+        "service": {
+          ".validate": true
+        },
+        "start": {
+          ".validate": true
+        },
+        "duration": {
+          ".validate": true
+        },
+        "price": {
+          ".validate": true
+        },
+        "token": {
+          ".validate": true
+        },
+        "createdAt": {
+          ".validate": true
+        },
+        "committedAt": {
+          ".validate": true
+        },
+        "$other": {
+          ".validate": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'"
+        }
+      },
+      "proof": {
+        ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.hasChildren(['before','after','free','claim','capacityBefore','capacityAfter','availableBefore','availableAfter']))",
+        "before": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 1100000)"
+        },
+        "after": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 1100000)"
+        },
+        "free": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 1100000)"
+        },
+        "claim": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 1100000)"
+        },
+        "capacityBefore": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 1100000)"
+        },
+        "capacityAfter": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 1100000)"
+        },
+        "availableBefore": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 1100000)"
+        },
+        "availableAfter": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 1100000)"
+        },
+        "$other": {
+          ".validate": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'"
+        }
+      },
+      "$other": {
+        ".validate": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'"
+      }
+    },
+    "sparkBookingDetails": {
+      ".read": "auth != null && ((root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (root.child('users').child(auth.uid).child('status').val() == 'active' && query.orderByChild == 'uid' && query.equalTo == auth.uid))",
+      ".indexOn": [
+        "uid",
+        "createdAt"
+      ],
+      "$id": {
+        ".read": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || ((auth != null && root.child('users').child(auth.uid).child('status').val() == 'active') && ((auth != null && data.child('uid').val() == auth.uid) || !data.exists()))",
+        ".write": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || ((auth != null && root.child('users').child(auth.uid).child('status').val() == 'active') && (root.child('sparkBookingControl').child('phase').val() == 'ready') && !data.exists() && newData.exists() && newData.child('uid').val() == auth.uid && !root.child('bookings').child($id).exists() && !root.child('sparkSchedule').child('journal').val().contains('|' + $id + '|'))",
+        ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.hasChildren(['id','uid','service','date','time','startMinutes','durationMinutes','totalPrice','estimatedTotal','basePrice','baseTotal','nailQuantity','nailArt','createdAt','status','name','phone','address','notes','referenceImageUrl']) && newData.child('id').val() == $id && newData.child('status').val() == 'Draft')",
+        "id": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().matches(/^[A-Za-z0-9_-]{1,128}$/))"
+        },
+        "uid": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 500)"
+        },
+        "service": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 500)"
+        },
+        "date": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/))"
+        },
+        "time": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().matches(/^([01][0-9]|2[0-3]):[0-5][0-9]$/))"
+        },
+        "createdAt": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z$/))"
+        },
+        "name": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 500)"
+        },
+        "phone": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 500)"
+        },
+        "address": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 500)"
+        },
+        "notes": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val().length <= 2000)"
+        },
+        "referenceImageUrl": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && (newData.val() == '' || (newData.val().length <= 260000 && newData.val().matches(/^data:image\\/jpeg;base64,[A-Za-z0-9+\\/=]+$/)) || (newData.val().length <= 2000 && newData.val().matches(/^https:\\/\\/firebasestorage\\.googleapis\\.com\\/v0\\/b\\/ln-by-piya(\\.appspot\\.com|\\.firebasestorage\\.app)\\/o\\/portfolio(%2F|\\/)[^ ]+$/))))"
+        },
+        "email": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isString() && newData.val() == auth.token.email)"
+        },
+        "basePrice": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000)"
+        },
+        "baseTotal": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000)"
+        },
+        "totalPrice": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000)"
+        },
+        "estimatedTotal": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000)"
+        },
+        "startMinutes": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0)"
+        },
+        "durationMinutes": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0)"
+        },
+        "nailQuantity": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 1 && newData.val() <= 10)"
+        },
+        "status": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.val() == 'Draft')"
+        },
+        "nailArt": {
+          ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.hasChildren(['enabled','quantity','pricePerNail','total']))",
+          "enabled": {
+            ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (newData.isBoolean())"
+          },
+          "$key": {
+            ".validate": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (($key == 'quantity' || $key == 'pricePerNail' || $key == 'total') && newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000 && ($key != 'quantity' || newData.val() % 1 == 0))"
+          }
+        },
+        "$other": {
+          ".validate": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'"
+        }
+      }
+    },
+    "sparkBookingAdmin": {
+      ".read": "auth != null && ((root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || (root.child('users').child(auth.uid).child('status').val() == 'active' && query.orderByChild == 'uid' && query.equalTo == auth.uid))",
+      ".write": "auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive'",
+      "$id": {
+        ".read": "(auth != null && root.child('admins').child(auth.uid).exists() && root.child('admins').child(auth.uid).child('status').val() != 'inactive') || ((auth != null && root.child('users').child(auth.uid).child('status').val() == 'active') && (root.child('sparkBookingDetails').child($id).child('uid').val() == auth.uid || root.child('bookings').child($id).child('uid').val() == auth.uid))"
       }
     }
   }
