@@ -1,4 +1,4 @@
-import { ref, get, set, update, runTransaction, onValue, query, orderByChild, equalTo } from 'firebase/database';
+import { ref, get, set, update, runTransaction, onValue, query, orderByChild, equalTo, serverTimestamp } from 'firebase/database';
 import { compilePolicy, compileCalendar, initialState, reserve, parseJournal, adminTransition, rebuild, clean, isBlocking, DAY } from './engine.js';
 import { createServicePricingFields } from '../../functions/shared/bookingPricing.js';
 import { SERVICES } from '../../functions/shared/constants/services.js';
@@ -212,7 +212,7 @@ export async function publishSparkAvailability(db, uid, patch = {}, { date, ackn
             const indexedRanges = (ranges = []) => Object.fromEntries(ranges.map((range, index) => [String(index), { start: range.start, end: range.end }]));
             const override = rawOverride ? {
               status: rawOverride.status,
-              updatedAt: Date.now(),
+              updatedAt: serverTimestamp(),
               ...(rawOverride.status === 'custom' ? { availableRanges: indexedRanges(rawOverride.availableRanges) } : {}),
               ...(rawOverride.blockedRanges?.length ? { blockedRanges: indexedRanges(rawOverride.blockedRanges) } : {}),
             } : null;
