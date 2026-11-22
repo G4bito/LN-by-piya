@@ -11,7 +11,7 @@ import {
   serviceSupportsNailArt,
 } from '../bookingPricing';
 import { SCHEDULE_CONFLICT_CODE, getServiceDurationMinutes, getUnavailableTimeSlots } from '../scheduling';
-import { filterBookingServices, getCalendarCells, getDatesWithoutBookableTimes, isDateFullyBooked, SERVICE_FILTERS } from '../bookingUi';
+import { filterBookingServices, getCalendarCells, getDatesWithoutBookableTimes, getNoBookableTimesReason, isDateFullyBooked, SERVICE_FILTERS } from '../bookingUi';
 import {
   BUSINESS_WEEKDAYS,
   addDaysToDateKey,
@@ -197,6 +197,12 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     settings,
     now,
   ), [calendarMonth, now, selected, settings]);
+  const noAvailableTimesReasons = useMemo(() => Object.fromEntries([...noAvailableTimesDates]
+    .map((key) => [key, getNoBookableTimesReason(key, selected ? getServiceDurationMinutes(selected) : 60, settings, now)])
+    .filter(([, reason]) => reason)), [noAvailableTimesDates, now, selected, settings]);
+  const calendarAvailabilityNote = Object.values(noAvailableTimesReasons).find((reason) => reason.type === 'minimum-notice')
+    || Object.values(noAvailableTimesReasons)[0]
+    || null;
   const calendarCells = useMemo(() => getCalendarCells(calendarMonth, {
     todayKey,
     closedWeekdays,
@@ -204,9 +210,10 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
     dateOverrides: settings.dateOverrides,
     fullyBookedDates,
     noAvailableTimesDates,
+    noAvailableTimesReasons,
     maximumDateKey,
     allowSameDayBooking: settings.allowSameDayBooking,
-  }), [blackoutDateKeys, calendarMonth, closedWeekdays, fullyBookedDates, noAvailableTimesDates, maximumDateKey, settings.allowSameDayBooking, settings.dateOverrides, todayKey]);
+  }), [blackoutDateKeys, calendarMonth, closedWeekdays, fullyBookedDates, noAvailableTimesDates, noAvailableTimesReasons, maximumDateKey, settings.allowSameDayBooking, settings.dateOverrides, todayKey]);
   const canNext =
     (step === 0 && Boolean(service)) ||
     (step === 1 && Boolean(date && time) && timeSlots.includes(time) && !availabilityLoading && !availabilityError && !businessSettingsLoading && !businessSettingsError && !unavailableTimeSlots.has(time)) ||
@@ -572,13 +579,15 @@ export default function BookingCalendar({ defaultService, user, onViewBookings, 
                           setTime('');
                           setError(null);
                         }}
-                        aria-label={`${formatAppointmentDate(cell.key)}${cell.isBlackout ? `, ${settings.blackoutDates[cell.key]?.reason || 'closed'}` : cell.isClosed ? ', closed' : cell.isFullyBooked ? ', fully booked' : cell.isBeyondAdvanceWindow ? ', outside booking window' : cell.isSameDayUnavailable ? ', same-day booking unavailable' : cell.hasNoAvailableTimes ? ', no available times' : ''}`}
+                        title={cell.noAvailableTimesReason?.message || undefined}
+                        aria-label={`${formatAppointmentDate(cell.key)}${cell.isBlackout ? `, ${settings.blackoutDates[cell.key]?.reason || 'closed'}` : cell.isClosed ? ', closed' : cell.isFullyBooked ? ', fully booked' : cell.isBeyondAdvanceWindow ? ', outside booking window' : cell.isSameDayUnavailable ? ', same-day booking unavailable' : cell.noAvailableTimesReason?.message ? `, ${cell.noAvailableTimesReason.message}` : ''}`}
                       >
                         <span>{cell.day}</span>
-                        {cell.isBlackout ? <small>Closed</small> : cell.isClosed ? <small>Closed</small> : cell.isFullyBooked ? <small>Full</small> : cell.isBeyondAdvanceWindow ? <small>Unavailable</small> : cell.isSameDayUnavailable ? <small>Tomorrow</small> : cell.hasNoAvailableTimes ? <small>No times</small> : null}
+                        {cell.isBlackout ? <small>Closed</small> : cell.isClosed ? <small>Closed</small> : cell.isFullyBooked ? <small>Full</small> : cell.isBeyondAdvanceWindow ? <small>Unavailable</small> : cell.isSameDayUnavailable ? <small>Tomorrow</small> : cell.hasNoAvailableTimes ? <small>{cell.noAvailableTimesReason?.label || 'No times'}</small> : null}
                       </button>
                     ) : <span className="booking-calendar-empty" key={`empty-${index}`} />)}
                   </div>
+                  {calendarAvailabilityNote ? <p className="availability-message" role="note">{calendarAvailabilityNote.message}</p> : null}
                 </section>
 
                 <section className="booking-time-panel" aria-labelledby="available-times-title">
