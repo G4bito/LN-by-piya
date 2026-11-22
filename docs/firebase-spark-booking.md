@@ -102,7 +102,7 @@ Cloud Storage now requires Blaze, including access to legacy buckets. The bounde
 - `src/components/BookingCalendar.jsx`: publication state, safe photo feedback and preserved confirmed response.
 - `src/components/SparkBookingPublication.jsx`, `src/pages/AdminPage.jsx`: prepare/refresh/recover controls within the existing Availability page.
 - `scripts/buildSparkRules.mjs`, `database.rules.json`: reproducible strict rules and preserved identity/loyalty rules.
-- `firebase.json`, `package.json`: Spark-only deployment/emulator defaults and test commands.
+- `firebase.json`, `vercel.json`, `package.json`: Spark-only deployment/emulator defaults and test commands; Vercel no longer configures or builds the retired `/api/booking` function.
 - `database.managed.rules.json`, `firebase.managed.json`, `tests/mobile/booking.managed.mjs`: preserved managed implementation configuration/tests.
 - `tests/sparkEngine.test.js`, `tests/spark/booking.test.js`, `tests/spark-app/booking.test.js`, `tests/mobile/booking.mjs`: unit, direct-SDK adversarial, real application integration and mobile checks.
 - `.env.server.example`, this report and notices in the historical assessment/release documents: distinguish active Spark setup from the preserved alternative.
