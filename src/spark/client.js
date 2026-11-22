@@ -9,6 +9,12 @@ import { pauseFailedPublicationLock, recoverStalePublicationLock } from './publi
 
 const value = async (db, path) => (await get(ref(db, path))).val();
 const unavailable = () => Object.assign(new Error('Online booking is temporarily unavailable. Please contact the salon or try again later.'), { code: 'booking/unavailable' });
+const isPermissionDenied = (error) => {
+  const code = String(error?.code || '').toLowerCase();
+  return code === '1' || code === 'permission_denied' || code === 'permission-denied'
+    || /permission[_ ]denied/i.test(String(error?.message || ''));
+};
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const sorted = (rows) => rows.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 const availabilityDiagnostic = (error, operation) => {
   const code = /^[a-zA-Z0-9_/-]{1,80}$/.test(error?.code || '') ? error.code : 'availability/publish-failed';
@@ -19,17 +25,22 @@ const availabilityDiagnostic = (error, operation) => {
   return failure;
 };
 export async function submitSparkBooking(db, user, payload, photo = '') {
+  return submitSparkBookingAttempt(db, user, payload, photo, 0);
+}
+
+async function submitSparkBookingAttempt(db, user, payload, photo, publicationRetries) {
   if (!user?.uid) throw Object.assign(new Error('Please sign in before booking.'), { code: 'booking/unauthenticated' });
   let operation = 'load-spark-policy';
+  let control;
   try {
     const existing = await value(db, `sparkBookingDetails/${payload.id}`);
     if (existing?.uid === user.uid) {
       const committed = parseJournal(await value(db, 'sparkSchedule/journal'))[payload.id];
       if (committed) return { ...existing, ...committed, customerName: existing.name, customerPhone: existing.phone, replayed: true };
     }
-    const [control, policy, calendar, raw] = await Promise.all([
-      value(db, 'sparkBookingControl'), value(db, 'sparkBookingPolicy'), value(db, `sparkBookingCalendar/${payload.date}`),
-      value(db, 'settings/business'),
+    control = await value(db, 'sparkBookingControl');
+    const [policy, calendar, raw] = await Promise.all([
+      value(db, 'sparkBookingPolicy'), value(db, `sparkBookingCalendar/${payload.date}`), value(db, 'settings/business'),
     ]);
     if (control?.phase !== 'ready' || (control.windowEnds && getAppointmentTimestamp(payload.date, '00:00', 'Asia/Manila') >= control.windowEnds) || !policy || !calendar) throw unavailable();
     const service = SERVICES.find((s) => s.id === payload.service);
@@ -56,13 +67,46 @@ export async function submitSparkBooking(db, user, payload, photo = '') {
       catch (error) { conflict = error; return undefined; }
     }, { applyLocally: false });
     if (conflict) throw conflict;
+    if (!result.committed) {
+      if (publicationRetries < 1) {
+        let latestControl = await value(db, 'sparkBookingControl');
+        if (latestControl?.phase === 'publishing' || latestControl?.publishedAt !== control?.publishedAt) {
+          for (let attempt = 0; attempt < 12 && latestControl?.phase === 'publishing'; attempt += 1) {
+            await wait(250);
+            latestControl = (await value(db, 'sparkBookingControl')) || {};
+          }
+          if (latestControl?.phase === 'ready' && latestControl.publishedAt !== control?.publishedAt) {
+            return submitSparkBookingAttempt(db, user, payload, photo, publicationRetries + 1);
+          }
+        }
+      }
+      throw Object.assign(new Error('The reservation was rejected by the booking rules.'), { code: 'booking/permission-denied' });
+    }
     const saved = parseJournal(result.snapshot.val()?.journal)[payload.id];
     if (!saved) throw unavailable();
     return { ...details, ...saved, customerName: details.name, customerPhone: details.phone, uid: user.uid };
   } catch (error) {
     // Never log payloads, URLs, names, UID, email, or SDK messages containing paths.
-    console.error('Booking submission failed.', { operation, code: /^[a-zA-Z0-9_/-]{1,80}$/.test(error?.code || '') ? error.code : 'booking/failed' });
-    if (error?.code === 'PERMISSION_DENIED' || error?.code === 'permission-denied') throw Object.assign(new Error('Your booking could not be reserved. Refresh availability and try again, or contact the salon.'), { code: 'booking/permission-denied' });
+    const denied = isPermissionDenied(error);
+    console.error('Booking submission failed.', { operation, code: denied ? 'permission-denied' : /^[a-zA-Z0-9_/-]{1,80}$/.test(String(error?.code || '')) ? error.code : 'booking/failed' });
+    if (denied && publicationRetries < 1) {
+      try {
+        let latestControl = await value(db, 'sparkBookingControl');
+        const publicationChanged = latestControl?.publishedAt !== control?.publishedAt;
+        if (latestControl?.phase === 'publishing' || publicationChanged) {
+          for (let attempt = 0; attempt < 12 && latestControl?.phase === 'publishing'; attempt += 1) {
+            await wait(250);
+            latestControl = await value(db, 'sparkBookingControl');
+          }
+          if (latestControl?.phase === 'ready' && latestControl?.publishedAt !== control?.publishedAt) {
+            return submitSparkBookingAttempt(db, user, payload, photo, publicationRetries + 1);
+          }
+        }
+      } catch {
+        // Keep the original, safely mapped permission error if control cannot be read.
+      }
+    }
+    if (denied) throw Object.assign(new Error('Your booking could not be reserved. Refresh availability and try again, or contact the salon.'), { code: 'booking/permission-denied' });
     throw error;
   }
 }
