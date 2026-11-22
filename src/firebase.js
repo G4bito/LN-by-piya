@@ -5,6 +5,7 @@ import { getApp, getApps, initializeApp } from 'firebase/app';
 import { submitSparkBooking, publishSparkAvailability, changeSparkBooking, listenSparkBookings, readSparkBookings, listenSparkSchedule } from './spark/client.js';
 import { encodeReferencePhoto } from './spark/photo.js';
 import { parseJournal, isBlocking as isSparkBlocking } from './spark/engine.js';
+import { recoverStalePublicationLock } from './spark/publicationLock.js';
 import { bookingDiagnostic } from '../functions/shared/bookingErrors.js';
 import {
   getAuth,
@@ -528,10 +529,9 @@ export function listenToSparkBookingState(callback) {
 export async function resumeSparkAvailability(acknowledgedAppointmentIds = []) {
   const controlRef = ref(rtdb, 'sparkBookingControl');
   await get(controlRef);
-  const reset = await runTransaction(controlRef, (current) => {
-    if (current?.phase === 'publishing' && Date.now() - Number(current.startedAt) < 120000) return undefined;
-    return { phase: 'paused' };
-  }, { applyLocally: false });
+  const reset = await runTransaction(controlRef, (current) => current?.phase === 'publishing'
+    ? recoverStalePublicationLock(current)
+    : { phase: 'paused' }, { applyLocally: false });
   if (!reset.committed) throw new Error('Publishing is still in progress. Wait two minutes before recovery.');
   return refreshSparkAvailability(acknowledgedAppointmentIds);
 }

@@ -5,6 +5,7 @@ import { SERVICES } from '../../functions/shared/constants/services.js';
 import { getTimeMinutes } from '../../functions/shared/scheduling.js';
 import { getDateKeyInTimeZone, getAppointmentTimestamp } from '../../functions/shared/businessSettings.js';
 import { getAffectedAppointments } from '../../functions/shared/availability.js';
+import { recoverStalePublicationLock } from './publicationLock.js';
 
 const value = async (db, path) => (await get(ref(db, path))).val();
 const unavailable = () => Object.assign(new Error('Online booking is temporarily unavailable. Please contact the salon or try again later.'), { code: 'booking/unavailable' });
@@ -142,12 +143,30 @@ export async function changeSparkBooking(db, id, status, move, request) {
 export async function publishSparkAvailability(db, uid, patch = {}, { date, acknowledgedAppointmentIds = [] } = {}) {
   const token = globalThis.crypto.randomUUID();
   const controlRef = ref(db, 'sparkBookingControl');
-  await get(controlRef);
-  const lock = await runTransaction(controlRef, (current) => current?.phase === 'publishing' ? undefined : { phase: 'publishing', owner: uid, token, startedAt: Date.now() }, { applyLocally: false });
-  if (!lock.committed) throw new Error('Availability publishing is already in progress or was interrupted. An administrator must review and resume it.');
+  const acquireLock = () => runTransaction(controlRef, (current) => current?.phase === 'publishing' ? undefined : { phase: 'publishing', owner: uid, token, startedAt: Date.now() }, { applyLocally: false });
+  let operation = 'acquire-publishing-lock';
+  let lock;
+  try {
+    await get(controlRef);
+    lock = await acquireLock();
+    if (!lock.committed) {
+      const recovered = await runTransaction(controlRef, (current) => recoverStalePublicationLock(current), { applyLocally: false });
+      if (recovered.committed || recovered.snapshot.val()?.phase !== 'publishing') lock = await acquireLock();
+    }
+  } catch (error) {
+    const code = /^[a-zA-Z0-9_/-]{1,80}$/.test(error?.code || '') ? error.code : 'availability/publish-failed';
+    console.error('Availability publishing failed.', { operation, code });
+    throw error;
+  }
+  if (!lock.committed) {
+    console.warn('Availability publishing is blocked by an active publisher.', { operation, code: 'availability/publisher-active' });
+    throw new Error('Availability publishing is already in progress or was interrupted. An administrator must review and resume it.');
+  }
   let changed = false;
   try {
+    operation = 'load-current-schedule';
     const [raw, core, legacy, oldSlots] = await Promise.all([value(db, 'settings/business'), value(db, 'sparkSchedule'), value(db, 'bookings'), value(db, 'scheduleSlots')]);
+    operation = 'validate-availability-and-existing-appointments';
     const changes = typeof patch === 'function' ? patch(raw || {}) : patch;
     const updated = { ...(raw || {}), ...changes }, compiled = compilePolicy(updated);
     const records = core ? Object.values(parseJournal(core.journal)) : Object.entries(legacy || {}).map(([id, b]) => ({ ...b, id }));
@@ -177,6 +196,7 @@ export async function publishSparkAvailability(db, uid, patch = {}, { date, ackn
     // Phase is frozen before these reads. Scheduling mutations also reject publishing.
     // A single update commits policy, calendar, reservations and settings together.
     changed = true;
+    operation = 'save-schedule-and-business-hours';
     state.publicationToken = token;
     state.lastEvent = { type: 'publish' };
     const settingsUpdates = {};
@@ -200,11 +220,14 @@ export async function publishSparkAvailability(db, uid, patch = {}, { date, ackn
     }
     await update(ref(db), { sparkSchedule: state, sparkBookingCalendar: calendar, sparkBookingPolicy: compiled.policy,
       sparkBookingCatalog: compiled.catalog, ...settingsUpdates });
+    operation = 'release-publishing-lock';
     const released = await runTransaction(controlRef, (current) => current === null ? null : current.token === token ? { phase: 'ready', publishedAt: Date.now(), windowEnds: state.origin + state.days * DAY, holdUntil: state.legacyHoldUntil } : undefined, { applyLocally: false });
     if (!released.committed || released.snapshot.val()?.phase !== 'ready') throw new Error('Availability was saved, but booking remains paused. Please refresh the schedule.');
     if (!released.committed || released.snapshot.val()?.phase !== 'ready') throw new Error('Publishing needs administrator review before booking can resume.');
     return { override: date ? updated.dateOverrides?.[date] || null : null, publishedUntil: state.origin + state.days * DAY };
   } catch (error) {
+    const code = /^[a-zA-Z0-9_/-]{1,80}$/.test(error?.code || '') ? error.code : 'availability/publish-failed';
+    console.error('Availability publishing failed.', { operation, code });
     // Once a write may have reached Firebase, stay paused. Never unfreeze uncertain state.
     if (!changed) await runTransaction(controlRef, (current) => current === null ? null : current.token === token ? { phase: 'paused', owner: uid, token } : undefined, { applyLocally: false }).catch(() => {});
     throw error;
