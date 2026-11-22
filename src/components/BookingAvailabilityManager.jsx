@@ -93,7 +93,11 @@ export default function BookingAvailabilityManager({ settings: settingsValue, bo
         setDraft(result.override || emptyDraft());
         setMessage(value ? `Availability saved for ${formatDate(date)}.` : `Default hours restored for ${formatDate(date)}.`);
       }
-    } catch (saveError) { setError(saveError.message || 'Availability could not be saved. Please try again.'); }
+    } catch (saveError) {
+      setError(saveError.availabilityOperation
+        ? `Availability publishing failed during ${saveError.availabilityOperation} (${saveError.availabilityCode}). Booking stays paused. Review and resume the schedule before retrying.`
+        : saveError.message || 'Availability could not be saved. Please try again.');
+    }
     finally { setSaving(false); }
   }
 
