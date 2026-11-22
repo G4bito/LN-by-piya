@@ -1,4 +1,5 @@
-import { getBookableTimeSlots, getBookingDateRestriction, normalizeBusinessSettings } from './businessSettings.js';
+import { getAppointmentTimestamp, getBookableTimeSlots, getBookingDateRestriction, normalizeBusinessSettings } from './businessSettings.js';
+import { getDayAvailableRanges } from '../functions/shared/dateOverrides.js';
 
 export const SERVICE_FILTERS = Object.freeze(['All', 'Manicure', 'Extensions', 'Removal', 'Repair']);
 
@@ -38,6 +39,57 @@ export function getDatesWithoutBookableTimes(monthDate, durationMinutes, setting
   return dates;
 }
 
+function formatClockTime(value) {
+  const [hours, minutes] = value.split(':').map(Number);
+  const period = hours < 12 ? 'AM' : 'PM';
+  return `${hours % 12 || 12}:${String(minutes).padStart(2, '0')} ${period}`;
+}
+
+export function getNoBookableTimesReason(dateKey, durationMinutes, settingsValue, now = new Date()) {
+  const settings = normalizeBusinessSettings(settingsValue);
+  if (getBookingDateRestriction(dateKey, settings, now)) return null;
+
+  const eligibleStarts = getBookableTimeSlots(dateKey, durationMinutes, settings, now);
+  if (eligibleStarts.length) return null;
+
+  const startsBeforeNotice = getBookableTimeSlots(dateKey, durationMinutes, {
+    ...settings,
+    minimumNoticeHours: 0,
+  }, now);
+  if (settings.minimumNoticeHours > 0 && startsBeforeNotice.length) {
+    const noticeHours = settings.minimumNoticeHours;
+    const noticeLabel = `${noticeHours}-hour${noticeHours === 1 ? '' : ' minimum'} booking notice`;
+    const endTimes = getDayAvailableRanges(dateKey, settings).map((range) => formatClockTime(range.end));
+    const endsMessage = endTimes.length
+      ? ` Available hours end at ${[...new Set(endTimes)].join(' and ')}; an end time is a closing boundary, not an appointment start.`
+      : '';
+    return {
+      type: 'minimum-notice',
+      label: 'Notice',
+      message: `No start times remain outside the ${noticeLabel}.${endsMessage}`,
+    };
+  }
+
+  const dayStart = getAppointmentTimestamp(dateKey, '00:00', settings.timezone);
+  const startsToday = dayStart == null ? [] : getBookableTimeSlots(dateKey, durationMinutes, {
+    ...settings,
+    minimumNoticeHours: 0,
+  }, new Date(dayStart));
+  if (startsToday.length) {
+    return {
+      type: 'elapsed',
+      label: 'Passed',
+      message: 'All configured appointment start times have passed for this date.',
+    };
+  }
+
+  return {
+    type: 'duration-or-interval',
+    label: 'No times',
+    message: `No start time fits this ${durationMinutes}-minute service inside the configured hours at the ${settings.bookingInterval}-minute booking interval.`,
+  };
+}
+
 export function getCalendarCells(monthDate, options = {}) {
   const year = monthDate.getFullYear();
   const month = monthDate.getMonth();
@@ -45,6 +97,7 @@ export function getCalendarCells(monthDate, options = {}) {
   const closedWeekdays = new Set(options.closedWeekdays || []);
   const fullyBookedDates = options.fullyBookedDates || new Set();
   const noAvailableTimesDates = options.noAvailableTimesDates || new Set();
+  const noAvailableTimesReasons = options.noAvailableTimesReasons || {};
   const blackoutDates = options.blackoutDates || new Set();
   const dateOverrides = options.dateOverrides || {};
   const maximumDateKey = options.maximumDateKey || '';
@@ -74,6 +127,7 @@ export function getCalendarCells(monthDate, options = {}) {
       isBeyondAdvanceWindow,
       isFullyBooked,
       hasNoAvailableTimes,
+      noAvailableTimesReason: noAvailableTimesReasons[key] || null,
       disabled: isPast || isSameDayUnavailable || isBeyondAdvanceWindow || isClosed || isBlackout || isFullyBooked || hasNoAvailableTimes,
     });
   }
