@@ -184,9 +184,16 @@ export async function publishSparkAvailability(db, uid, patch = {}, { date, ackn
       if (key === 'dateOverrides') {
         for (const dateKey of new Set([...Object.keys(raw?.dateOverrides || {}), ...Object.keys(entry || {})])) {
           if (JSON.stringify(raw?.dateOverrides?.[dateKey]) !== JSON.stringify(entry?.[dateKey])) {
-            const override = entry?.[dateKey] ? { ...entry[dateKey], updatedAt: Date.now() } : null;
+            const rawOverride = entry?.[dateKey];
+            const indexedRanges = (ranges = []) => Object.fromEntries(ranges.map((range, index) => [String(index), { start: range.start, end: range.end }]));
+            const override = rawOverride ? {
+              status: rawOverride.status,
+              updatedAt: Date.now(),
+              ...(rawOverride.status === 'custom' ? { availableRanges: indexedRanges(rawOverride.availableRanges) } : {}),
+              ...(rawOverride.blockedRanges?.length ? { blockedRanges: indexedRanges(rawOverride.blockedRanges) } : {}),
+            } : null;
             settingsUpdates[`settings/business/dateOverrides/${dateKey}`] = override;
-            if (override) updated.dateOverrides[dateKey] = override;
+            if (override) updated.dateOverrides[dateKey] = rawOverride;
           }
         }
       } else settingsUpdates[`settings/business/${key}`] = entry;
@@ -194,6 +201,7 @@ export async function publishSparkAvailability(db, uid, patch = {}, { date, ackn
     await update(ref(db), { sparkSchedule: state, sparkBookingCalendar: calendar, sparkBookingPolicy: compiled.policy,
       sparkBookingCatalog: compiled.catalog, ...settingsUpdates });
     const released = await runTransaction(controlRef, (current) => current === null ? null : current.token === token ? { phase: 'ready', publishedAt: Date.now(), windowEnds: state.origin + state.days * DAY, holdUntil: state.legacyHoldUntil } : undefined, { applyLocally: false });
+    if (!released.committed || released.snapshot.val()?.phase !== 'ready') throw new Error('Availability was saved, but booking remains paused. Please refresh the schedule.');
     if (!released.committed || released.snapshot.val()?.phase !== 'ready') throw new Error('Publishing needs administrator review before booking can resume.');
     return { override: date ? updated.dateOverrides?.[date] || null : null, publishedUntil: state.origin + state.days * DAY };
   } catch (error) {
